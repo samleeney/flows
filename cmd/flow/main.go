@@ -17,6 +17,7 @@ func main() {
 		newRunCmd(),
 		newValidateCmd(),
 		newVizCmd(),
+		newChartCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
