@@ -16,6 +16,7 @@ func main() {
 	root.AddCommand(
 		newRunCmd(),
 		newValidateCmd(),
+		newVizCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
