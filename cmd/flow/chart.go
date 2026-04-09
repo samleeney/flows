@@ -15,6 +15,7 @@ func newChartCmd() *cobra.Command {
 	var (
 		port   int
 		noOpen bool
+		uiDir  string
 	)
 
 	cmd := &cobra.Command{
@@ -22,7 +23,13 @@ func newChartCmd() *cobra.Command {
 		Short: "Open visual editor in browser",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			srv, err := editor.NewServer(args[0])
+			var srv *editor.Server
+			var err error
+			if uiDir != "" {
+				srv, err = editor.NewServer(args[0], uiDir)
+			} else {
+				srv, err = editor.NewServer(args[0])
+			}
 			if err != nil {
 				return fmt.Errorf("creating editor: %w", err)
 			}
@@ -48,6 +55,7 @@ func newChartCmd() *cobra.Command {
 
 	cmd.Flags().IntVar(&port, "port", 8420, "Port for the editor server")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "Don't auto-open the browser")
+	cmd.Flags().StringVar(&uiDir, "ui-dir", "", "Path to built frontend assets (default: embedded)")
 
 	return cmd
 }
