@@ -366,6 +366,164 @@ blocks in that language.
 
 ---
 
+## Open design questions
+
+These were identified during design but not fully resolved. The implementer
+should make decisions on these early.
+
+### Agent output format
+
+Agent output is raw text (LLM output is text). Downstream start conditions need
+to inspect that text (e.g. `contains: "approved"`). Options for how to handle
+this, in order of complexity:
+
+1. **String matching / regex on raw output** — simple, fragile
+2. **Require agents to emit structured markers** — e.g. first line must be
+   `STATUS: approved` or `STATUS: needs_changes`
+3. **Output parser per agent** — agent config includes a parser that extracts
+   typed fields from raw text
+4. **Small router LLM call** — a cheap model classifies the output
+
+Recommendation: start with option 2 (structured markers) as it's simple and
+explicit. Can add parsers later if needed.
+
+### Failure handling
+
+What happens when an agent errors, times out, or a loop hits max_runs without
+the exit condition being met? Options:
+
+- **Stop the whole flow** and report the error
+- **Skip downstream agents** that depend on the failed agent
+- **Retry** the failed agent (with configurable max retries)
+- **Fire a dedicated error-handler agent**
+
+This should be configurable per-agent and per-flow, with sensible defaults
+(e.g. stop on error, configurable timeout).
+
+### Input merge semantics
+
+When a node has two incoming edges both providing the same named input (e.g. two
+upstream agents both produce `code`), the runtime needs a rule:
+
+- Last writer wins
+- Error (require disambiguation)
+- Explicit merge/pick node
+
+Recommendation: error by default, require the user to disambiguate. Silent
+last-writer-wins leads to subtle bugs.
+
+### Context vs data
+
+Worth distinguishing between:
+
+- **Data**: specific to this run (the code, the review comments, agent outputs)
+- **Context**: ambient configuration (which LLM model to use, temperature,
+  system prompt template, API keys)
+
+Context could be inherited/overridden hierarchically (flow-level defaults,
+per-agent overrides) rather than wired through input ports. This keeps the data
+flow graph clean. Example in frontmatter:
+
+```yaml
+---
+name: Code Review Flow
+defaults:
+  model: claude-sonnet-4-20250514
+  temperature: 0.3
+---
+```
+
+With per-agent override:
+
+```yaml
+inputs: ...
+start: ...
+model: claude-opus-4-0-20250115
+temperature: 0.7
+```
+
+### Parser implementation
+
+Use a markdown parsing library (e.g. goldmark for Go) rather than hand-rolling
+regex-based splitting. The parser needs to:
+
+1. Extract YAML frontmatter (`---` to `---`)
+2. Split on `## ` headings
+3. For each section: extract first yaml code block as config, detect if a code
+   block in another language follows (function node) or remaining text (prompt)
+
+A library handles edge cases (nested code blocks, escaped characters) that
+regex will miss.
+
+### Scaling
+
+The markdown single-file format works well for flows of 3-15 agents. For larger
+flows:
+
+- Support an `include` directive in frontmatter to compose from multiple files
+- At hundreds+ of agents, flows are likely generated (not hand-authored), so the
+  markdown format becomes an intermediate representation
+- The parser and runtime scale fine to thousands of agents; the human authoring
+  experience is what breaks
+
+---
+
+## Alternatives considered and rejected
+
+These were evaluated during design. Documented here so the implementer
+understands why certain paths were not taken.
+
+### Custom DSL
+
+A purpose-built language for defining flows. Rejected because: building a
+parser, runtime, error reporting, and tooling from scratch is expensive. DSLs
+tend to grow scope until they become bad general-purpose languages. Every user
+has to learn new syntax.
+
+### Pure YAML
+
+All config, including prompts, in YAML. Rejected because: prompts are long,
+formatted text. In YAML they'd be ugly multiline strings indented 4 levels deep,
+or external file references (at which point you have multiple files anyway).
+Markdown makes prompts first-class.
+
+### Python with a graph API (LangGraph-style)
+
+Define flows in Python using a constrained API that builds a graph. Rejected
+for this project because: deployment friction (requires Python runtime), and the
+target use case (CI, servers, GitHub Actions) favours a single binary. However,
+LangGraph is good prior art — the execution model is similar.
+
+### Pure Python
+
+Write flows as imperative Python code. Rejected because: the flow structure
+gets buried in code, hard to visualize/serialize/inspect, nothing prevents
+spaghetti.
+
+### Embedding equations/algorithms in the spec
+
+Adding expression evaluation to the YAML config (e.g. `score > 0.8`,
+arithmetic). Rejected because of scope creep — every workflow tool that adds
+expressions eventually becomes a bad programming language (see: GitHub Actions
+`${{ }}` expressions). Instead, computation lives in function nodes (code
+blocks) where a real language handles it properly.
+
+### Shared blackboard state model
+
+All agents read/write a single shared state dict (the LangGraph approach).
+Rejected in favour of explicit named inputs because: implicit coupling makes it
+impossible to tell from the graph which agent needs what, naming collisions
+occur, and parallel execution is unsafe.
+
+### Message passing / event-based data flow
+
+Agents emit typed messages, downstream agents subscribe by message type.
+Rejected because: flow structure becomes implicit in subscriptions rather than
+visible in the graph, harder to reason about, and debugging "why didn't this
+agent fire?" is painful.
+
+---
+
 ## Key design decisions
 
 1. **Markdown as the spec format** — prompts are the most important part of each
@@ -387,3 +545,25 @@ blocks in that language.
 6. **Reactive/dataflow execution** — agents fire when their conditions are met.
    No imperative control flow. Loops emerge from mutual references with
    termination caps.
+
+---
+
+## Mental models and prior art
+
+These analogies help explain the design intent:
+
+- **Make**: targets declare dependencies and recipes. `make` resolves the graph
+  and executes in order. This project is the same idea — agents declare
+  dependencies (start conditions) and the runtime resolves execution order.
+
+- **Emacs Org Mode**: a single file mixes prose and executable code blocks in
+  multiple languages, and they work together. The markdown flow format follows
+  the same philosophy — prompts (prose) and code blocks coexist in one document.
+
+- **Spreadsheets**: cells reference other cells, and the engine recalculates
+  when dependencies change. The reactive execution model here works the same
+  way — agents fire when their referenced inputs become available.
+
+- **Hardware description languages**: describe components and their wiring
+  declaratively; a simulator resolves timing and execution. Similar to how
+  agents describe their connections and the runtime resolves execution order.
