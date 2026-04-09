@@ -23,13 +23,14 @@ func newChartCmd() *cobra.Command {
 		Short: "Open visual editor in browser",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var srv *editor.Server
-			var err error
+			var uiFS http.FileSystem
 			if uiDir != "" {
-				srv, err = editor.NewServer(args[0], uiDir)
+				uiFS = http.Dir(uiDir)
 			} else {
-				srv, err = editor.NewServer(args[0])
+				uiFS = embeddedUI()
 			}
+
+			srv, err := editor.NewServer(args[0], uiFS)
 			if err != nil {
 				return fmt.Errorf("creating editor: %w", err)
 			}

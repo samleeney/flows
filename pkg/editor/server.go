@@ -18,7 +18,7 @@ import (
 // Server is the editor backend.
 type Server struct {
 	filePath string
-	uiDir    string // path to built frontend (ui/dist)
+	uiFS     http.FileSystem // built frontend assets
 	mu       sync.RWMutex
 	flow     *model.Flow
 	clients  map[*websocket.Conn]bool
@@ -28,9 +28,9 @@ type Server struct {
 }
 
 // NewServer creates a new editor server for the given flow file.
-// uiDir is the path to the built frontend assets (ui/dist). If empty,
+// uiFS is an optional http.FileSystem for serving the built frontend. If nil,
 // a placeholder page is served.
-func NewServer(filePath string, uiDir ...string) (*Server, error) {
+func NewServer(filePath string, uiFS ...http.FileSystem) (*Server, error) {
 	flow, err := parser.ParseFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", filePath, err)
@@ -44,8 +44,8 @@ func NewServer(filePath string, uiDir ...string) (*Server, error) {
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
-	if len(uiDir) > 0 {
-		s.uiDir = uiDir[0]
+	if len(uiFS) > 0 {
+		s.uiFS = uiFS[0]
 	}
 
 	return s, nil
@@ -105,10 +105,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/flow", s.handleFlow)
 	mux.HandleFunc("/ws", s.handleWebSocket)
-	if s.uiDir != "" {
+	if s.uiFS != nil {
 		// Serve built React app
-		fs := http.FileServer(http.Dir(s.uiDir))
-		mux.Handle("/", fs)
+		mux.Handle("/", http.FileServer(s.uiFS))
 	} else {
 		mux.HandleFunc("/", s.handleIndex)
 	}

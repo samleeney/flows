@@ -66,7 +66,7 @@ func newRunCmd() *cobra.Command {
 			// Build executor registry
 			// TODO: add real LLM prompt executor
 			prompt := &stubPromptExecutor{}
-			registry := runtime.NewExecutorRegistry(prompt, &runtime.BashExecutor{})
+			registry := runtime.NewExecutorRegistry(prompt, &runtime.BashExecutor{}, &runtime.PythonExecutor{})
 
 			opts := runtime.RunOptions{
 				ExternalInputs: externalInputs,
