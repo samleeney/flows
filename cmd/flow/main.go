@@ -9,8 +9,10 @@ import (
 
 func main() {
 	root := &cobra.Command{
-		Use:   "flow",
-		Short: "Declarative agent orchestration tool",
+		Use:           "flow",
+		Short:         "Declarative agent orchestration tool",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	root.AddCommand(
