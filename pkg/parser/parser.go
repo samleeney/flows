@@ -2,14 +2,12 @@
 package parser
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"strings"
 
 	"github.com/samleeney/flows/pkg/model"
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/text"
 	"gopkg.in/yaml.v3"
 )
 
@@ -96,177 +94,213 @@ func parseFrontmatter(data []byte, flow *model.Flow) error {
 	return nil
 }
 
-// parseAgents walks the goldmark AST to extract agent sections.
+// parseAgents splits the body on ## headings and extracts each agent section
+// using a line-based scanner. Prose content is preserved as raw bytes so
+// markdown formatting (lists, emphasis, links, etc.) is never lost.
 func parseAgents(body []byte) ([]model.Agent, error) {
-	md := goldmark.New()
-	reader := text.NewReader(body)
-	doc := md.Parser().Parse(reader)
-
-	var agents []model.Agent
-	var currentName string
-	var sectionNodes []ast.Node
-
-	// Collect nodes grouped by ## headings.
-	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
-		heading, isHeading := node.(*ast.Heading)
-		if isHeading && heading.Level == 2 {
-			// Process previous section if any
-			if currentName != "" {
-				agent, err := buildAgent(currentName, sectionNodes, body)
-				if err != nil {
-					return nil, fmt.Errorf("agent %q: %w", currentName, err)
-				}
-				agents = append(agents, agent)
-			}
-			currentName = extractHeadingText(heading, body)
-			sectionNodes = nil
-			continue
-		}
-		if currentName != "" {
-			sectionNodes = append(sectionNodes, node)
-		}
-	}
-
-	// Process the last section
-	if currentName != "" {
-		agent, err := buildAgent(currentName, sectionNodes, body)
+	sections := splitSections(body)
+	agents := make([]model.Agent, 0, len(sections))
+	for _, sec := range sections {
+		agent, err := parseSection(sec)
 		if err != nil {
-			return nil, fmt.Errorf("agent %q: %w", currentName, err)
+			return nil, fmt.Errorf("agent %q: %w", sec.name, err)
 		}
 		agents = append(agents, agent)
 	}
-
 	return agents, nil
 }
 
-func extractHeadingText(heading *ast.Heading, src []byte) string {
+type section struct {
+	name string
+	body string // raw markdown between the ## heading and the next ## heading
+}
+
+// splitSections walks the body line-by-line and groups lines under each
+// top-level ## heading. A line starting with ``` begins a fenced code block;
+// any ## lines inside such a block are treated as content, not headings.
+func splitSections(body []byte) []section {
+	var sections []section
+	var current *section
 	var buf bytes.Buffer
-	for child := heading.FirstChild(); child != nil; child = child.NextSibling() {
-		if t, ok := child.(*ast.Text); ok {
-			buf.Write(t.Segment.Value(src))
+	inFence := false
+	fenceMark := ""
+
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Track fenced code blocks so we don't mistake ## inside code for a heading
+		if !inFence {
+			if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+				inFence = true
+				fenceMark = line[:3]
+			}
+		} else if strings.HasPrefix(line, fenceMark) {
+			inFence = false
+			fenceMark = ""
+		}
+
+		if !inFence && strings.HasPrefix(line, "## ") {
+			// End previous section
+			if current != nil {
+				current.body = buf.String()
+				sections = append(sections, *current)
+				buf.Reset()
+			}
+			name := strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			current = &section{name: name}
+			continue
+		}
+
+		if current != nil {
+			buf.WriteString(line)
+			buf.WriteByte('\n')
 		}
 	}
-	return strings.TrimSpace(buf.String())
+
+	if current != nil {
+		current.body = buf.String()
+		sections = append(sections, *current)
+	}
+
+	return sections
 }
 
 // agentConfig is the raw YAML config block for an agent.
 type agentConfig struct {
-	Position     [2]int                `yaml:"position"`
+	Position     [2]int                 `yaml:"position"`
 	Inputs       map[string]model.Input `yaml:"inputs"`
 	Start        []model.Condition      `yaml:"start"`
-	Model        string                `yaml:"model"`
-	Temperature  float64               `yaml:"temperature"`
-	OnError      string                `yaml:"on_error"`
-	OnExhaustion string                `yaml:"on_exhaustion"`
+	Model        string                 `yaml:"model"`
+	Temperature  float64                `yaml:"temperature"`
+	OnError      string                 `yaml:"on_error"`
+	OnExhaustion string                 `yaml:"on_exhaustion"`
 }
 
-// buildAgent constructs an Agent from the AST nodes in its section.
-func buildAgent(name string, nodes []ast.Node, src []byte) (model.Agent, error) {
+// parseSection extracts the first ```yaml code block as config, then determines
+// whether the rest is prose (prompt) or a ```lang code block (function).
+func parseSection(sec section) (model.Agent, error) {
 	agent := model.Agent{
-		Name:   name,
+		Name:   sec.name,
 		Inputs: make(map[string]model.Input),
 	}
 
-	yamlFound := false
-	var contentParts []string
+	yamlContent, afterYAML, ok := extractFirstCodeBlock(sec.body, "yaml")
+	if !ok {
+		return agent, fmt.Errorf("missing yaml config block")
+	}
 
-	for _, node := range nodes {
-		cb, isFenced := node.(*ast.FencedCodeBlock)
-		if !isFenced {
-			// Collect non-code-block text as potential prompt content
-			raw := extractNodeText(node, src)
-			if raw != "" {
-				contentParts = append(contentParts, raw)
-			}
-			continue
-		}
+	var cfg agentConfig
+	if err := yaml.Unmarshal([]byte(yamlContent), &cfg); err != nil {
+		return agent, fmt.Errorf("parsing config YAML: %w", err)
+	}
+	agent.Position = cfg.Position
+	agent.Inputs = cfg.Inputs
+	if agent.Inputs == nil {
+		agent.Inputs = make(map[string]model.Input)
+	}
+	agent.Start = cfg.Start
+	agent.Model = cfg.Model
+	agent.Temperature = cfg.Temperature
+	agent.OnError = cfg.OnError
+	agent.OnExhaustion = cfg.OnExhaustion
 
-		lang := string(cb.Language(src))
-		code := extractCodeBlockContent(cb, src)
-
-		if !yamlFound && lang == "yaml" {
-			// First yaml block is the config
-			var cfg agentConfig
-			if err := yaml.Unmarshal([]byte(code), &cfg); err != nil {
-				return agent, fmt.Errorf("parsing config YAML: %w", err)
-			}
-			agent.Position = cfg.Position
-			agent.Inputs = cfg.Inputs
-			if agent.Inputs == nil {
-				agent.Inputs = make(map[string]model.Input)
-			}
-			agent.Start = cfg.Start
-			agent.Model = cfg.Model
-			agent.Temperature = cfg.Temperature
-			agent.OnError = cfg.OnError
-			agent.OnExhaustion = cfg.OnExhaustion
-			yamlFound = true
-			continue
-		}
-
-		// A non-yaml code block after the config → function node
-		if yamlFound && lang != "yaml" && lang != "" {
+	// Look at what follows the YAML block. Skip leading blank lines.
+	// If the next non-blank content is a fenced code block in another language,
+	// it's a function node. Otherwise, the remaining text is the prompt.
+	trimmedStart := strings.TrimLeft(afterYAML, "\n \t")
+	if strings.HasPrefix(trimmedStart, "```") || strings.HasPrefix(trimmedStart, "~~~") {
+		lang, code, _, ok := extractFirstCodeBlockAny(afterYAML)
+		if ok && lang != "" && lang != "yaml" {
 			agent.NodeType = model.FunctionNode
 			agent.Language = lang
 			agent.Content = code
 			return agent, nil
 		}
-
-		// Unexpected extra yaml or unlabeled code block — include as content
-		contentParts = append(contentParts, code)
 	}
 
-	// If we get here, it's a prompt node
 	agent.NodeType = model.PromptNode
-	agent.Content = strings.TrimSpace(strings.Join(contentParts, "\n\n"))
-
+	agent.Content = strings.TrimSpace(afterYAML)
 	return agent, nil
 }
 
-// extractCodeBlockContent reads the text content of a fenced code block.
-func extractCodeBlockContent(cb *ast.FencedCodeBlock, src []byte) string {
-	var buf bytes.Buffer
-	lines := cb.Lines()
-	for i := 0; i < lines.Len(); i++ {
-		seg := lines.At(i)
-		buf.Write(seg.Value(src))
-	}
-	return strings.TrimRight(buf.String(), "\n")
-}
+// extractFirstCodeBlock finds the first fenced code block with the given
+// language tag and returns its content plus the text following the closing
+// fence. Returns false if no such block exists.
+func extractFirstCodeBlock(body, wantLang string) (content, after string, found bool) {
+	lines := strings.SplitAfter(body, "\n")
+	var codeBuf bytes.Buffer
+	inBlock := false
+	var fenceMark string
 
-// extractNodeText extracts raw source text for a node and its children.
-func extractNodeText(node ast.Node, src []byte) string {
-	var buf bytes.Buffer
-	collectText(node, src, &buf)
-	return strings.TrimSpace(buf.String())
-}
-
-func collectText(node ast.Node, src []byte, buf *bytes.Buffer) {
-	if node.Type() == ast.TypeBlock {
-		// For block nodes, reconstruct from lines
-		if lb, ok := node.(interface{ Lines() *text.Segments }); ok {
-			lines := lb.Lines()
-			for i := 0; i < lines.Len(); i++ {
-				seg := lines.At(i)
-				buf.Write(seg.Value(src))
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		if !inBlock {
+			if isFenceStart(trimmed, wantLang) {
+				inBlock = true
+				if strings.HasPrefix(trimmed, "```") {
+					fenceMark = "```"
+				} else {
+					fenceMark = "~~~"
+				}
+				continue
 			}
+		} else {
+			if strings.HasPrefix(trimmed, fenceMark) {
+				// End of block
+				after := strings.Join(lines[i+1:], "")
+				return strings.TrimRight(codeBuf.String(), "\n"), after, true
+			}
+			codeBuf.WriteString(line)
 		}
-		// Also recurse into children for nested content
-		for child := node.FirstChild(); child != nil; child = child.NextSibling() {
-			collectText(child, src, buf)
+	}
+
+	return "", "", false
+}
+
+// extractFirstCodeBlockAny finds the first fenced code block of any language.
+func extractFirstCodeBlockAny(body string) (lang, content, after string, found bool) {
+	lines := strings.SplitAfter(body, "\n")
+	var codeBuf bytes.Buffer
+	inBlock := false
+	var fenceMark string
+
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		if !inBlock {
+			if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+				inBlock = true
+				if strings.HasPrefix(trimmed, "```") {
+					fenceMark = "```"
+					lang = strings.TrimSpace(trimmed[3:])
+				} else {
+					fenceMark = "~~~"
+					lang = strings.TrimSpace(trimmed[3:])
+				}
+				continue
+			}
+		} else {
+			if strings.HasPrefix(trimmed, fenceMark) {
+				after := strings.Join(lines[i+1:], "")
+				return lang, strings.TrimRight(codeBuf.String(), "\n"), after, true
+			}
+			codeBuf.WriteString(line)
 		}
+	}
+
+	return "", "", "", false
+}
+
+// isFenceStart reports whether a line opens a code block with the given lang.
+func isFenceStart(line, wantLang string) bool {
+	var rest string
+	if strings.HasPrefix(line, "```") {
+		rest = line[3:]
+	} else if strings.HasPrefix(line, "~~~") {
+		rest = line[3:]
 	} else {
-		// Inline nodes
-		switch t := node.(type) {
-		case *ast.Text:
-			buf.Write(t.Segment.Value(src))
-			if t.SoftLineBreak() {
-				buf.WriteByte('\n')
-			}
-		default:
-			for child := node.FirstChild(); child != nil; child = child.NextSibling() {
-				collectText(child, src, buf)
-			}
-		}
+		return false
 	}
+	return strings.TrimSpace(rest) == wantLang
 }

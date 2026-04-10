@@ -2,6 +2,7 @@ package serializer
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/samleeney/flows/pkg/model"
@@ -109,6 +110,45 @@ func TestSerializeFunctionNode(t *testing.T) {
 	reporter := flow2.Agents[1]
 	if reporter.NodeType != model.PromptNode {
 		t.Errorf("reporter.nodeType: got %v, want PromptNode", reporter.NodeType)
+	}
+}
+
+func TestSerializeIdempotent(t *testing.T) {
+	// Parse → serialize → parse → serialize should produce identical bytes
+	// after the first round-trip. This catches parser double-counting bugs
+	// where content grows on each round-trip.
+	flow, err := parser.ParseFile(filepath.Join("..", "parser", "testdata", "code_review.md"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	first, err := Serialize(flow)
+	if err != nil {
+		t.Fatalf("first serialize: %v", err)
+	}
+
+	flow2, err := parser.Parse(first)
+	if err != nil {
+		t.Fatalf("second parse: %v", err)
+	}
+
+	second, err := Serialize(flow2)
+	if err != nil {
+		t.Fatalf("second serialize: %v", err)
+	}
+
+	if string(first) != string(second) {
+		t.Errorf("round-trip not idempotent:\nfirst length: %d\nsecond length: %d", len(first), len(second))
+	}
+
+	// Specifically check that the reviewer's prompt appears exactly once
+	phrase := "Review the provided code against the guidelines."
+	for _, agent := range flow2.Agents {
+		if agent.Name == "reviewer" {
+			if n := strings.Count(agent.Content, phrase); n != 1 {
+				t.Errorf("reviewer content has %q repeated %d times after round-trip", phrase, n)
+			}
+		}
 	}
 }
 

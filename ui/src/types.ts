@@ -2,7 +2,13 @@ export interface FlowJSON {
   name: string;
   description: string;
   external_inputs: string[];
+  defaults: DefaultsJSON;
   agents: AgentJSON[];
+}
+
+export interface DefaultsJSON {
+  model?: string;
+  temperature?: number;
 }
 
 export interface AgentJSON {

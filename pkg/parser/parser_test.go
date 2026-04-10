@@ -2,6 +2,7 @@ package parser
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/samleeney/flows/pkg/model"
@@ -74,6 +75,11 @@ func TestParseCodeReviewFlow(t *testing.T) {
 	}
 	if reviewer.Content == "" {
 		t.Error("reviewer.content is empty")
+	}
+	// Verify no text duplication in content (regression for parser double-counting)
+	phrase := "Review the provided code against the guidelines."
+	if n := strings.Count(reviewer.Content, phrase); n != 1 {
+		t.Errorf("reviewer.content contains %q %d times, want exactly 1", phrase, n)
 	}
 
 	// Fixer

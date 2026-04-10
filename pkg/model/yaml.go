@@ -25,10 +25,55 @@ func (s *StringOrList) UnmarshalYAML(value *yaml.Node) error {
 	}
 }
 
-// MarshalYAML writes a single string as a scalar, multiple as a sequence.
+// MarshalYAML writes a single string as a scalar, multiple strings as a
+// compact flow-style sequence (e.g. [a, b, c]).
 func (s StringOrList) MarshalYAML() (interface{}, error) {
 	if len(s) == 1 {
 		return s[0], nil
 	}
-	return []string(s), nil
+	node := &yaml.Node{
+		Kind:  yaml.SequenceNode,
+		Style: yaml.FlowStyle,
+	}
+	for _, v := range s {
+		node.Content = append(node.Content, &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Value: v,
+		})
+	}
+	return node, nil
+}
+
+// MarshalYAML writes Input as a compact flow-style map so inputs stay on
+// one line (e.g. `{ from: fixer, fallback: external }`) instead of expanding
+// into multiple lines.
+func (i Input) MarshalYAML() (interface{}, error) {
+	node := &yaml.Node{
+		Kind:  yaml.MappingNode,
+		Style: yaml.FlowStyle,
+	}
+	node.Content = append(node.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "from"},
+		&yaml.Node{Kind: yaml.ScalarNode, Value: i.From},
+	)
+	if i.Fallback != "" {
+		node.Content = append(node.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "fallback"},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: i.Fallback},
+		)
+	}
+	return node, nil
+}
+
+// MarshalYAML writes AlwaysCondition as a flow-style map to keep it compact.
+func (a AlwaysCondition) MarshalYAML() (interface{}, error) {
+	node := &yaml.Node{
+		Kind:  yaml.MappingNode,
+		Style: yaml.FlowStyle,
+	}
+	node.Content = append(node.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "max_runs"},
+		&yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprintf("%d", a.MaxRuns)},
+	)
+	return node, nil
 }

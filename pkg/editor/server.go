@@ -53,10 +53,17 @@ func NewServer(filePath string, uiFS ...http.FileSystem) (*Server, error) {
 
 // FlowJSON is the JSON representation sent to the frontend.
 type FlowJSON struct {
-	Name           string      `json:"name"`
-	Description    string      `json:"description"`
-	ExternalInputs []string    `json:"external_inputs"`
-	Agents         []AgentJSON `json:"agents"`
+	Name           string       `json:"name"`
+	Description    string       `json:"description"`
+	ExternalInputs []string     `json:"external_inputs"`
+	Defaults       DefaultsJSON `json:"defaults"`
+	Agents         []AgentJSON  `json:"agents"`
+}
+
+// DefaultsJSON mirrors model.Defaults.
+type DefaultsJSON struct {
+	Model       string  `json:"model,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
 }
 
 // AgentJSON is the JSON representation of an agent for the frontend.
@@ -295,7 +302,11 @@ func flowToJSON(flow *model.Flow) FlowJSON {
 		Name:           flow.Name,
 		Description:    flow.Description,
 		ExternalInputs: flow.ExternalInputs,
-		Agents:         agents,
+		Defaults: DefaultsJSON{
+			Model:       flow.Defaults.Model,
+			Temperature: flow.Defaults.Temperature,
+		},
+		Agents: agents,
 	}
 }
 
@@ -348,7 +359,11 @@ func jsonToFlow(fj *FlowJSON) *model.Flow {
 		Name:           fj.Name,
 		Description:    fj.Description,
 		ExternalInputs: fj.ExternalInputs,
-		Agents:         agents,
+		Defaults: model.Defaults{
+			Model:       fj.Defaults.Model,
+			Temperature: fj.Defaults.Temperature,
+		},
+		Agents: agents,
 	}
 }
 

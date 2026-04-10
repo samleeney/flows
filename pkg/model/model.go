@@ -35,7 +35,7 @@ type Agent struct {
 // Input represents a data source for an agent input.
 type Input struct {
 	From     string `yaml:"from"`
-	Fallback string `yaml:"fallback"`
+	Fallback string `yaml:"fallback,omitempty"`
 }
 
 // Condition represents a start condition for an agent.

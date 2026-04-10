@@ -64,6 +64,48 @@ func TestServerGetFlow(t *testing.T) {
 	if reviewer.Position != [2]int{0, 0} {
 		t.Errorf("agent[0].position = %v, want [0,0]", reviewer.Position)
 	}
+
+	// Defaults should round-trip through the JSON layer.
+	if flowJSON.Defaults.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("defaults.model = %q, want %q", flowJSON.Defaults.Model, "claude-sonnet-4-20250514")
+	}
+	if flowJSON.Defaults.Temperature != 0.3 {
+		t.Errorf("defaults.temperature = %v, want 0.3", flowJSON.Defaults.Temperature)
+	}
+}
+
+func TestServerRoundTripPreservesDefaults(t *testing.T) {
+	tmp := copyTestFile(t)
+	srv, err := NewServer(tmp)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	defer srv.Close()
+
+	// GET the flow, then PUT it back unchanged. Defaults must survive.
+	req := httptest.NewRequest(http.MethodGet, "/api/flow", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	body := w.Body.Bytes()
+	putReq := httptest.NewRequest(http.MethodPut, "/api/flow", bytes.NewReader(body))
+	putW := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(putW, putReq)
+	if putW.Code != http.StatusOK {
+		t.Fatalf("PUT failed: %d", putW.Code)
+	}
+
+	// Read the file back and verify defaults are still there
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if !bytes.Contains(data, []byte("claude-sonnet-4-20250514")) {
+		t.Errorf("defaults.model was stripped during round-trip")
+	}
+	if !bytes.Contains(data, []byte("temperature: 0.3")) {
+		t.Errorf("defaults.temperature was stripped during round-trip")
+	}
 }
 
 func TestServerPutFlow(t *testing.T) {
