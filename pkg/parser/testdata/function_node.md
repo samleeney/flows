@@ -2,7 +2,7 @@
 name: Function Node Flow
 description: Flow with a function node
 external_inputs:
-  - raw_data
+  - data
 ---
 
 ## processor
@@ -17,8 +17,8 @@ start:
 
 ```python
 import json
-data = json.loads(raw_data)
-output = [d for d in data if d["score"] > 0.5]
+parsed = json.loads(data)
+output = [d for d in parsed if d["score"] > 0.5]
 ```
 
 ## reporter

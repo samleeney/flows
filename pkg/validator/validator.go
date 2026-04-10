@@ -91,9 +91,14 @@ func validateAgent(agent *model.Agent, agentNames, externalInputs map[string]boo
 		}
 
 		if input.From == "external" {
-			// External inputs don't need to reference another agent,
-			// but we could check they're declared in frontmatter.
-			// For now this is a soft check.
+			// The input key must match a declared external input.
+			if !externalInputs[name] {
+				errs = append(errs, ValidationError{
+					Agent:   agent.Name,
+					Field:   fmt.Sprintf("inputs.%s", name),
+					Message: fmt.Sprintf("references external input %q but it is not declared in external_inputs", name),
+				})
+			}
 		} else if !agentNames[input.From] {
 			errs = append(errs, ValidationError{
 				Agent:   agent.Name,
@@ -102,7 +107,15 @@ func validateAgent(agent *model.Agent, agentNames, externalInputs map[string]boo
 			})
 		}
 
-		if input.Fallback != "" && input.Fallback != "external" && !agentNames[input.Fallback] {
+		if input.Fallback == "external" {
+			if !externalInputs[name] {
+				errs = append(errs, ValidationError{
+					Agent:   agent.Name,
+					Field:   fmt.Sprintf("inputs.%s.fallback", name),
+					Message: fmt.Sprintf("references external input %q but it is not declared in external_inputs", name),
+				})
+			}
+		} else if input.Fallback != "" && !agentNames[input.Fallback] {
 			errs = append(errs, ValidationError{
 				Agent:   agent.Name,
 				Field:   fmt.Sprintf("inputs.%s.fallback", name),

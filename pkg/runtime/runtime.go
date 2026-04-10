@@ -35,6 +35,7 @@ func Run(ctx context.Context, flow *model.Flow, registry *ExecutorRegistry, opts
 		opts:     opts,
 		outputs:  make(map[string]string),
 		runs:     make(map[string]int),
+		consumed: make(map[string]map[string]int),
 		agents:   make(map[string]*model.Agent),
 	}
 
@@ -50,8 +51,9 @@ type flowState struct {
 	registry *ExecutorRegistry
 	opts     RunOptions
 	mu       sync.Mutex
-	outputs  map[string]string // agent name → latest output
-	runs     map[string]int    // agent name → invocation count
+	outputs  map[string]string         // agent name → latest output
+	runs     map[string]int            // agent name → invocation count
+	consumed map[string]map[string]int // consumer → {producer → producer.runs at last consumption}
 	agents   map[string]*model.Agent
 }
 
@@ -150,7 +152,8 @@ func (s *flowState) conditionMet(agentName string, cond *model.Condition) bool {
 	}
 
 	if len(cond.When) > 0 {
-		// All referenced agents must have produced output
+		// All referenced agents must have produced output AND that output
+		// must be NEW since the last time this agent consumed it.
 		for _, dep := range cond.When {
 			output, hasOutput := s.outputs[dep]
 			if !hasOutput {
@@ -160,23 +163,11 @@ func (s *flowState) conditionMet(agentName string, cond *model.Condition) bool {
 			if cond.Contains != "" && !strings.Contains(output, cond.Contains) {
 				return false
 			}
-		}
-
-		// The "when" condition also requires new output since last run.
-		// We track this by checking if the dependency has run more recently.
-		// For simplicity: condition met if dependency has output and we haven't
-		// already consumed it at this run count.
-		if runs > 0 {
-			// On subsequent runs, we need the dependency to have produced
-			// NEW output (i.e., the dependency ran after our last run).
-			// We approximate this: if we already ran N times and dependency
-			// output hasn't changed, don't re-fire.
-			// This is tracked by checking if dependency run count > our run count - 1
-			for _, dep := range cond.When {
-				depRuns := s.runs[dep]
-				if depRuns <= runs-1 {
-					return false
-				}
+			// Check that dep has produced new output since our last consumption
+			depRuns := s.runs[dep]
+			consumed := s.consumed[agentName][dep]
+			if depRuns <= consumed {
+				return false
 			}
 		}
 
@@ -240,6 +231,22 @@ func (s *flowState) executeAgent(ctx context.Context, agent *model.Agent) error 
 	s.mu.Lock()
 	iteration := s.runs[agent.Name] + 1
 	s.runs[agent.Name] = iteration
+	// Record consumption of all upstream dependencies (from when clauses and
+	// input sources). This is how we know whether the dependency has produced
+	// NEW output on the next scheduling round.
+	if s.consumed[agent.Name] == nil {
+		s.consumed[agent.Name] = make(map[string]int)
+	}
+	for _, cond := range agent.Start {
+		for _, dep := range cond.When {
+			s.consumed[agent.Name][dep] = s.runs[dep]
+		}
+	}
+	for _, input := range agent.Inputs {
+		if input.From != "external" && input.From != "" {
+			s.consumed[agent.Name][input.From] = s.runs[input.From]
+		}
+	}
 	s.mu.Unlock()
 
 	if s.opts.OnAgentStart != nil {
