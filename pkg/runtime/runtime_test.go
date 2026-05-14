@@ -33,6 +33,19 @@ func (m *mockPromptExecutor) Execute(_ context.Context, content string, inputs m
 	return "mock output", nil
 }
 
+type agentAwareMockExecutor struct {
+	req ExecutionRequest
+}
+
+func (m *agentAwareMockExecutor) Execute(_ context.Context, content string, inputs map[string]string) (string, error) {
+	return "fallback", nil
+}
+
+func (m *agentAwareMockExecutor) ExecuteAgent(_ context.Context, req ExecutionRequest) (string, error) {
+	m.req = req
+	return "agent-aware output", nil
+}
+
 func TestRunSimpleSequence(t *testing.T) {
 	flow := &model.Flow{
 		Name:           "Simple",
@@ -77,6 +90,48 @@ func TestRunSimpleSequence(t *testing.T) {
 	}
 	if result.Outputs["step_two"] != "summary of: processed data" {
 		t.Errorf("step_two output = %q, want %q", result.Outputs["step_two"], "summary of: processed data")
+	}
+}
+
+func TestRunPassesAgentConfigToAgentExecutor(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "Configured",
+		ExternalInputs: []string{"data"},
+		Defaults:       model.Defaults{Model: "default-model", Temperature: 0.2},
+		Agents: []model.Agent{
+			{
+				Name:        "reviewer",
+				NodeType:    model.PromptNode,
+				Inputs:      map[string]model.Input{"data": {From: "external"}},
+				Start:       []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+				Content:     "Review the data.",
+				Model:       "agent-model",
+				Temperature: 0.7,
+			},
+		},
+	}
+
+	mock := &agentAwareMockExecutor{}
+	result, err := Run(context.Background(), flow, NewExecutorRegistry(mock), RunOptions{
+		ExternalInputs: map[string]string{"data": "payload"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Outputs["reviewer"] != "agent-aware output" {
+		t.Fatalf("output = %q, want agent-aware output", result.Outputs["reviewer"])
+	}
+	if mock.req.FlowName != "Configured" {
+		t.Fatalf("FlowName = %q, want Configured", mock.req.FlowName)
+	}
+	if mock.req.Defaults.Model != "default-model" {
+		t.Fatalf("Defaults.Model = %q, want default-model", mock.req.Defaults.Model)
+	}
+	if mock.req.Agent.Model != "agent-model" {
+		t.Fatalf("Agent.Model = %q, want agent-model", mock.req.Agent.Model)
+	}
+	if mock.req.Inputs["data"] != "payload" {
+		t.Fatalf("input data = %q, want payload", mock.req.Inputs["data"])
 	}
 }
 

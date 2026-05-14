@@ -40,8 +40,20 @@
 - [x] Embedded UI via Go embed.FS (12MB single binary)
 - [x] Makefile for build pipeline (build-ui, build-go, clean)
 - [x] Server refactored to accept http.FileSystem for embedded/disk serving
+- [x] HTTP LLM prompt executor for real prompt-node execution via Anthropic
+      Messages or OpenAI Responses APIs
+- [x] Runtime passes flow defaults and per-agent model/temperature overrides to
+      agent-aware executors
+- [x] `flow run` supports `--llm-provider`, `--model`, `--max-tokens`, and
+      `--llm-timeout`; API keys come from `ANTHROPIC_API_KEY` or
+      `OPENAI_API_KEY`
+- [x] CLI-level E2E tests covering function pipelines, conditional branches,
+      mixed bash/python flows, mocked LLM prompt execution, and missing input
+      failures
 
-**All phases complete.** 32 tests passing across 6 packages.
+**All phases complete.** Prompt nodes now execute against real LLM APIs when
+configured with a model and API key. Function-only flows still run without LLM
+credentials.
 
 ## Summary
 
@@ -52,3 +64,11 @@ CLI commands:
 - `flow chart <file>` — open visual editor in browser
 
 Build: `make build` produces a single binary with embedded frontend.
+
+LLM configuration for prompt nodes:
+- Set `defaults.model` in flow frontmatter or `model` on an individual agent.
+- Set `ANTHROPIC_API_KEY` for Claude models or `OPENAI_API_KEY` for OpenAI
+  models.
+- Optional environment overrides: `FLOW_LLM_PROVIDER`, `FLOW_MODEL`,
+  `FLOW_MAX_TOKENS`, `FLOW_LLM_TIMEOUT`, `ANTHROPIC_BASE_URL`,
+  `ANTHROPIC_VERSION`, `OPENAI_BASE_URL`.

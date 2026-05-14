@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/samleeney/flows/pkg/live"
+	"github.com/samleeney/flows/pkg/model"
 	"github.com/samleeney/flows/pkg/parser"
 	"github.com/samleeney/flows/pkg/runtime"
 	"github.com/samleeney/flows/pkg/validator"
@@ -20,6 +23,11 @@ func newRunCmd() *cobra.Command {
 		verbose bool
 		dryRun  bool
 		outDir  string
+
+		llmProvider string
+		llmModel    string
+		maxTokens   int
+		llmTimeout  time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -64,9 +72,22 @@ func newRunCmd() *cobra.Command {
 				return nil
 			}
 
+			if missing := missingExternalInputs(flow, externalInputs); len(missing) > 0 {
+				return fmt.Errorf("missing external input(s): %s", strings.Join(missing, ", "))
+			}
+
 			// Build executor registry
-			// TODO: add real LLM prompt executor
-			prompt := &stubPromptExecutor{}
+			prompt := runtime.NewHTTPPromptExecutor(runtime.HTTPPromptConfig{
+				Provider:         llmProvider,
+				Model:            llmModel,
+				AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
+				OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
+				AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+				OpenAIBaseURL:    os.Getenv("OPENAI_BASE_URL"),
+				AnthropicVersion: os.Getenv("ANTHROPIC_VERSION"),
+				MaxTokens:        maxTokens,
+				Timeout:          llmTimeout,
+			})
 			registry := runtime.NewExecutorRegistry(prompt, &runtime.BashExecutor{}, &runtime.PythonExecutor{})
 
 			// Discover any running editor for this flow file and build a
@@ -132,15 +153,12 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print agent execution details")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate and show plan without running")
 	cmd.Flags().StringVar(&outDir, "output", "", "Directory to write agent outputs")
+	cmd.Flags().StringVar(&llmProvider, "llm-provider", os.Getenv("FLOW_LLM_PROVIDER"), "LLM provider for prompt nodes: anthropic or openai (default: infer from model)")
+	cmd.Flags().StringVar(&llmModel, "model", os.Getenv("FLOW_MODEL"), "Override model for all prompt nodes (default: flow/agent model)")
+	cmd.Flags().IntVar(&maxTokens, "max-tokens", envInt("FLOW_MAX_TOKENS", runtime.DefaultMaxTokens), "Maximum output tokens for prompt nodes")
+	cmd.Flags().DurationVar(&llmTimeout, "llm-timeout", envDuration("FLOW_LLM_TIMEOUT", runtime.DefaultPromptTimeout), "Timeout for each prompt-node LLM request")
 
 	return cmd
-}
-
-// stubPromptExecutor is a placeholder until real LLM integration is added.
-type stubPromptExecutor struct{}
-
-func (s *stubPromptExecutor) Execute(_ context.Context, content string, inputs map[string]string) (string, error) {
-	return fmt.Sprintf("[stub] would send prompt (%d chars) with %d inputs to LLM", len(content), len(inputs)), nil
 }
 
 // buildLiveObserver returns a fan-out observer over discovered editor
@@ -155,4 +173,38 @@ func buildLiveObserver(descs []live.Descriptor) live.Observer {
 		children = append(children, live.NewHTTPObserver(d.BaseURL, d.Token))
 	}
 	return live.NewFanoutObserver(children...)
+}
+
+func missingExternalInputs(flow *model.Flow, inputs map[string]string) []string {
+	var missing []string
+	for _, name := range flow.ExternalInputs {
+		if _, ok := inputs[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func envInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func envDuration(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }

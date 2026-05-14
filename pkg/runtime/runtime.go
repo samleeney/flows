@@ -290,7 +290,13 @@ func (s *flowState) executeAgent(ctx context.Context, agent *model.Agent) error 
 	}
 
 	startTime := time.Now()
-	output, err := executor.Execute(ctx, agent.Content, inputs)
+	output, err := executeNode(ctx, executor, ExecutionRequest{
+		FlowName: s.flow.Name,
+		Defaults: s.flow.Defaults,
+		Agent:    *agent,
+		Content:  agent.Content,
+		Inputs:   inputs,
+	})
 	durationMS := time.Since(startTime).Milliseconds()
 
 	if s.opts.OnAgentDone != nil {
@@ -309,6 +315,13 @@ func (s *flowState) executeAgent(ctx context.Context, agent *model.Agent) error 
 	s.mu.Unlock()
 
 	return nil
+}
+
+func executeNode(ctx context.Context, executor Executor, req ExecutionRequest) (string, error) {
+	if ae, ok := executor.(AgentExecutor); ok {
+		return ae.ExecuteAgent(ctx, req)
+	}
+	return executor.Execute(ctx, req.Content, req.Inputs)
 }
 
 // emit constructs and publishes a single envelope. Holds emitMu for both seq
