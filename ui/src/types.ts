@@ -7,6 +7,7 @@ export interface FlowJSON {
 }
 
 export interface DefaultsJSON {
+  prompt_executor?: string;
   model?: string;
   temperature?: number;
 }
@@ -19,6 +20,7 @@ export interface AgentJSON {
   node_type: "prompt" | "function";
   language?: string;
   content: string;
+  prompt_executor?: string;
   model?: string;
   temperature?: number;
   on_error?: string;

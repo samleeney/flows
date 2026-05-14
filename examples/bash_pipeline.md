@@ -3,6 +3,10 @@ name: Bash Pipeline
 description: Test end-to-end execution with bash function nodes
 external_inputs:
   - message
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## greeter

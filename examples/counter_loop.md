@@ -3,6 +3,10 @@ name: Counter Loop
 description: Increment a counter until it says done
 external_inputs:
   - value
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## counter

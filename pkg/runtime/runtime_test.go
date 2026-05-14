@@ -97,16 +97,17 @@ func TestRunPassesAgentConfigToAgentExecutor(t *testing.T) {
 	flow := &model.Flow{
 		Name:           "Configured",
 		ExternalInputs: []string{"data"},
-		Defaults:       model.Defaults{Model: "default-model", Temperature: 0.2},
+		Defaults:       model.Defaults{PromptExecutor: "codex_cli", Model: "default-model", Temperature: 0.2},
 		Agents: []model.Agent{
 			{
-				Name:        "reviewer",
-				NodeType:    model.PromptNode,
-				Inputs:      map[string]model.Input{"data": {From: "external"}},
-				Start:       []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
-				Content:     "Review the data.",
-				Model:       "agent-model",
-				Temperature: 0.7,
+				Name:           "reviewer",
+				NodeType:       model.PromptNode,
+				PromptExecutor: "anthropic_api",
+				Inputs:         map[string]model.Input{"data": {From: "external"}},
+				Start:          []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+				Content:        "Review the data.",
+				Model:          "agent-model",
+				Temperature:    0.7,
 			},
 		},
 	}
@@ -126,6 +127,12 @@ func TestRunPassesAgentConfigToAgentExecutor(t *testing.T) {
 	}
 	if mock.req.Defaults.Model != "default-model" {
 		t.Fatalf("Defaults.Model = %q, want default-model", mock.req.Defaults.Model)
+	}
+	if mock.req.Defaults.PromptExecutor != "codex_cli" {
+		t.Fatalf("Defaults.PromptExecutor = %q, want codex_cli", mock.req.Defaults.PromptExecutor)
+	}
+	if mock.req.Agent.PromptExecutor != "anthropic_api" {
+		t.Fatalf("Agent.PromptExecutor = %q, want anthropic_api", mock.req.Agent.PromptExecutor)
 	}
 	if mock.req.Agent.Model != "agent-model" {
 		t.Fatalf("Agent.Model = %q, want agent-model", mock.req.Agent.Model)

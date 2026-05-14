@@ -19,20 +19,22 @@ import (
 
 func newRunCmd() *cobra.Command {
 	var (
-		inputs  []string
-		verbose bool
-		dryRun  bool
-		outDir  string
+		inputs     []string
+		foreground bool
+		verbose    bool
+		dryRun     bool
+		outDir     string
 
-		llmProvider string
-		llmModel    string
-		maxTokens   int
-		llmTimeout  time.Duration
+		promptExecutor string
+		llmProvider    string
+		llmModel       string
+		maxTokens      int
+		llmTimeout     time.Duration
 	)
 
 	cmd := &cobra.Command{
 		Use:   "run <file>",
-		Short: "Execute a flow",
+		Short: "Start a flow run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flow, err := parser.ParseFile(args[0])
@@ -76,26 +78,57 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("missing external input(s): %s", strings.Join(missing, ", "))
 			}
 
+			canonical, err := live.CanonicalFlowPath(args[0])
+			if err != nil {
+				return fmt.Errorf("canonicalize: %w", err)
+			}
+			flowKey := live.FlowKey(canonical)
+
+			editorSession, err := ensureRunEditor(args[0], canonical, flowKey, !foreground)
+			if err != nil {
+				return err
+			}
+			defer editorSession.Close()
+			fmt.Printf("View flow: %s\n", editorSession.BaseURL)
+
+			if !foreground {
+				pid, logPath, err := startBackgroundForegroundRun(flowKey)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Run started in background (pid %d).\n", pid)
+				fmt.Printf("Log: %s\n", logPath)
+				return nil
+			}
+
 			// Build executor registry
-			prompt := runtime.NewHTTPPromptExecutor(runtime.HTTPPromptConfig{
-				Provider:         llmProvider,
-				Model:            llmModel,
-				AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-				OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
-				AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
-				OpenAIBaseURL:    os.Getenv("OPENAI_BASE_URL"),
-				AnthropicVersion: os.Getenv("ANTHROPIC_VERSION"),
-				MaxTokens:        maxTokens,
-				Timeout:          llmTimeout,
+			defaultPromptExecutor := promptExecutor
+			if defaultPromptExecutor == "" && llmProvider != "" {
+				defaultPromptExecutor = llmProvider
+			}
+
+			prompt := runtime.NewPromptRouterExecutor(runtime.PromptRouterConfig{
+				DefaultExecutor: defaultPromptExecutor,
+				HTTP: runtime.HTTPPromptConfig{
+					Provider:         llmProvider,
+					Model:            llmModel,
+					AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
+					OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
+					AnthropicBaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+					OpenAIBaseURL:    os.Getenv("OPENAI_BASE_URL"),
+					AnthropicVersion: os.Getenv("ANTHROPIC_VERSION"),
+					MaxTokens:        maxTokens,
+					Timeout:          llmTimeout,
+				},
+				Codex: runtime.CodexCLIConfig{
+					Command: os.Getenv("FLOW_CODEX_COMMAND"),
+					Model:   llmModel,
+					Timeout: llmTimeout,
+				},
 			})
 			registry := runtime.NewExecutorRegistry(prompt, &runtime.BashExecutor{}, &runtime.PythonExecutor{})
 
-			// Discover any running editor for this flow file and build a
-			// best-effort live observer that fans out to all of them.
-			canonical, _ := live.CanonicalFlowPath(args[0])
-			flowKey := live.FlowKey(canonical)
-			descriptors, _ := live.DiscoverDescriptors(flowKey)
-			observer := buildLiveObserver(descriptors)
+			observer := buildLiveObserver(editorSession.Descriptors)
 			defer observer.Close()
 
 			opts := runtime.RunOptions{
@@ -105,7 +138,7 @@ func newRunCmd() *cobra.Command {
 				Observer:       observer,
 			}
 
-			if verbose {
+			if foreground || verbose {
 				opts.OnAgentStart = func(name string, iter int) {
 					fmt.Printf("[%s] iteration %d starting...\n", name, iter)
 				}
@@ -150,9 +183,11 @@ func newRunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringArrayVar(&inputs, "input", nil, "External input as name=value (repeatable)")
+	cmd.Flags().BoolVarP(&foreground, "foreground", "f", false, "Run in the foreground and print live progress")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print agent execution details")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate and show plan without running")
 	cmd.Flags().StringVar(&outDir, "output", "", "Directory to write agent outputs")
+	cmd.Flags().StringVar(&promptExecutor, "prompt-executor", os.Getenv("FLOW_PROMPT_EXECUTOR"), "Override prompt executor for all prompt nodes: codex_cli, anthropic_api, or openai_api")
 	cmd.Flags().StringVar(&llmProvider, "llm-provider", os.Getenv("FLOW_LLM_PROVIDER"), "LLM provider for prompt nodes: anthropic or openai (default: infer from model)")
 	cmd.Flags().StringVar(&llmModel, "model", os.Getenv("FLOW_MODEL"), "Override model for all prompt nodes (default: flow/agent model)")
 	cmd.Flags().IntVar(&maxTokens, "max-tokens", envInt("FLOW_MAX_TOKENS", runtime.DefaultMaxTokens), "Maximum output tokens for prompt nodes")

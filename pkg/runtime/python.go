@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -37,7 +38,11 @@ if output is not None:
         print(_json.dumps(output))
 `, string(inputJSON), content)
 
-	cmd := exec.CommandContext(ctx, "python3", "-c", wrapper)
+	pythonCmd := os.Getenv("FLOW_PYTHON_COMMAND")
+	if pythonCmd == "" {
+		pythonCmd = "python3"
+	}
+	cmd := exec.CommandContext(ctx, pythonCmd, "-c", wrapper)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("python execution failed: %w\noutput: %s", err, string(out))

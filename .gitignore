@@ -1,3 +1,4 @@
 ui/node_modules/
 cmd/flow/ui_dist/
 /flow
+.venv/

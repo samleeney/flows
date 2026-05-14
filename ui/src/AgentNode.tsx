@@ -2,13 +2,29 @@ import { Handle, Position } from "@xyflow/react";
 import type { AgentJSON, AgentLiveState, AgentLiveStatus } from "./types";
 
 interface AgentNodeProps {
-  data: { agent: AgentJSON; label: string; liveState?: AgentLiveState };
+  data: {
+    agent: AgentJSON;
+    label: string;
+    liveState?: AgentLiveState;
+    role?: AgentRole;
+  };
 }
 
 interface ColorScheme {
   border: string;
   background: string;
   badgeBg: string;
+}
+
+interface AgentRole {
+  isStart?: boolean;
+  isFinish?: boolean;
+  isStopGate?: boolean;
+}
+
+interface RoleBadgeProps {
+  label: "START" | "FINISH" | "STOP";
+  title: string;
 }
 
 function colorsFor(status: AgentLiveStatus, isFunction: boolean): ColorScheme {
@@ -53,13 +69,108 @@ function formatLabel(
   return base;
 }
 
+function typeColors(isFunction: boolean) {
+  return isFunction
+    ? { bg: "#3730a3", color: "#eef2ff", border: "#a5b4fc" }
+    : { bg: "#1d4ed8", color: "#eff6ff", border: "#93c5fd" };
+}
+
+function roleColors(label: RoleBadgeProps["label"]) {
+  switch (label) {
+    case "START":
+      return { bg: "#dcfce7", border: "#86efac", color: "#166534" };
+    case "FINISH":
+      return { bg: "#ffe4e6", border: "#fda4af", color: "#9f1239" };
+    case "STOP":
+    default:
+      return { bg: "#fef3c7", border: "#fbbf24", color: "#92400e" };
+  }
+}
+
+function RoleBadge({ label, title }: RoleBadgeProps) {
+  const colors = roleColors(label);
+  return (
+    <span
+      title={title}
+      style={{
+        border: `1px solid ${colors.border}`,
+        borderRadius: 4,
+        background: colors.bg,
+        color: colors.color,
+        fontSize: 10,
+        fontWeight: 800,
+        lineHeight: "14px",
+        padding: "1px 5px",
+        letterSpacing: 0.4,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function TypeGlyph({
+  isFunction,
+  language,
+}: {
+  isFunction: boolean;
+  language?: string;
+}) {
+  const colors = typeColors(isFunction);
+  const sharedStyle = {
+    width: 24,
+    height: 24,
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: `1px solid ${colors.border}`,
+    background: colors.bg,
+    color: colors.color,
+  };
+  if (!isFunction) {
+    return (
+      <span
+        title="agent prompt"
+        style={{
+          ...sharedStyle,
+          borderRadius: 999,
+          fontSize: 18,
+          fontWeight: 800,
+          lineHeight: "20px",
+        }}
+      >
+        ∞
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={`${language ?? "code"} code block`}
+      style={{
+        ...sharedStyle,
+        borderRadius: 6,
+        fontFamily: isFunction
+          ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+          : "system-ui, sans-serif",
+        fontSize: isFunction ? 11 : 12,
+        fontWeight: 800,
+      }}
+    >
+      {"{}"}
+    </span>
+  );
+}
+
 export function AgentNode({ data }: AgentNodeProps) {
-  const { agent, label, liveState } = data;
+  const { agent, label, liveState, role } = data;
   const isFunction = agent.node_type === "function";
   const status: AgentLiveStatus = liveState?.status ?? "idle";
   const iter = liveState?.iter ?? 0;
   const colors = colorsFor(status, isFunction);
   const labelDisplay = formatLabel(label, status, iter);
+  const hasRoleBadge = role?.isStart || role?.isFinish || role?.isStopGate;
 
   return (
     <div
@@ -68,9 +179,16 @@ export function AgentNode({ data }: AgentNodeProps) {
         border: `2px solid ${colors.border}`,
         borderRadius: isFunction ? "12px" : "6px",
         background: colors.background,
-        minWidth: 160,
+        width: 280,
+        boxSizing: "border-box",
         fontFamily: "system-ui, sans-serif",
+        cursor: "pointer",
         transition: "background 200ms ease, border-color 200ms ease",
+        boxShadow: role?.isStart
+          ? "inset 5px 0 0 #22c55e"
+          : role?.isFinish || role?.isStopGate
+          ? "inset -5px 0 0 #fb7185"
+          : undefined,
       }}
     >
       <Handle
@@ -93,6 +211,7 @@ export function AgentNode({ data }: AgentNodeProps) {
           marginBottom: 4,
         }}
       >
+        <TypeGlyph isFunction={isFunction} language={agent.language} />
         <span
           style={{
             fontFamily:
@@ -108,20 +227,57 @@ export function AgentNode({ data }: AgentNodeProps) {
         >
           {labelDisplay}
         </span>
-        <span style={{ fontWeight: 600 }}>{agent.name}</span>
+        <span
+          title={agent.name}
+          style={{
+            fontWeight: 600,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {agent.name}
+        </span>
         {status === "running" && (
           <span className="flow-spinner" style={{ marginLeft: "auto" }} />
         )}
       </div>
       <div style={{ fontSize: 11, color: "#64748b" }}>
-        {isFunction ? `[${agent.language}]` : "prompt"}
+        {isFunction ? `${agent.language ?? "code"} code block` : "agent prompt"}
       </div>
+      {hasRoleBadge && (
+        <div
+          style={{
+            display: "flex",
+            gap: 5,
+            marginTop: 6,
+            flexWrap: "wrap",
+          }}
+        >
+          {role?.isStart && (
+            <RoleBadge label="START" title="Runs from an always condition" />
+          )}
+          {role?.isFinish && (
+            <RoleBadge
+              label="FINISH"
+              title="No downstream agent starts from this output"
+            />
+          )}
+          {role?.isStopGate && (
+            <RoleBadge
+              label="STOP"
+              title="The run can stop here when no downstream condition matches"
+            />
+          )}
+        </div>
+      )}
       <div
         style={{
           fontSize: 11,
           color: "#94a3b8",
-          marginTop: 4,
-          maxWidth: 200,
+          marginTop: hasRoleBadge ? 6 : 4,
+          maxWidth: 240,
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
@@ -136,7 +292,7 @@ export function AgentNode({ data }: AgentNodeProps) {
             fontSize: 10,
             color: "#b91c1c",
             marginTop: 4,
-            maxWidth: 200,
+            maxWidth: 240,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",

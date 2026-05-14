@@ -3,6 +3,10 @@ name: Mixed Languages
 description: Bash, Python working together on data
 external_inputs:
   - numbers
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## parser

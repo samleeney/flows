@@ -10,7 +10,10 @@ export interface LiveHandlers {
 export function useFlowWebSocket(handlers: LiveHandlers) {
   const wsRef = useRef<WebSocket | null>(null);
   const handlersRef = useRef(handlers);
-  handlersRef.current = handlers;
+
+  useEffect(() => {
+    handlersRef.current = handlers;
+  }, [handlers]);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";

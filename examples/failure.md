@@ -3,6 +3,10 @@ name: Failure Test
 description: Agent with non-zero exit
 external_inputs:
   - input
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## good_one

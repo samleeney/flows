@@ -3,6 +3,10 @@ name: Diamond DAG
 description: Deep diamond-shaped dependency graph
 external_inputs:
   - seed
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## a

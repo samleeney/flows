@@ -79,7 +79,8 @@ external_inputs:
   - code
   - guidelines
 defaults:
-  model: claude-sonnet-4-20250514
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
   temperature: 0.3
 ---
 ```
@@ -89,7 +90,7 @@ defaults:
 | `name`             | Yes      | Human-readable flow name                       |
 | `description`      | No       | What the flow does                             |
 | `external_inputs`  | Yes      | Named inputs provided at flow start            |
-| `defaults`         | No       | Default LLM config inherited by all agents     |
+| `defaults`         | No       | Default prompt executor and LLM config inherited by all agents |
 
 ### 2.3 Agent definition
 
@@ -117,7 +118,8 @@ external_inputs:
   - code
   - guidelines
 defaults:
-  model: claude-sonnet-4-20250514
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
   temperature: 0.3
 ---
 
@@ -236,6 +238,7 @@ are specified in the agent's YAML config block:
 ```yaml
 inputs: ...
 start: ...
+prompt_executor: anthropic_api
 model: claude-opus-4-0-20250115
 temperature: 0.7
 ```
@@ -243,17 +246,18 @@ temperature: 0.7
 This separates ambient configuration (model, temperature, API settings) from
 data flow (inputs/outputs), keeping the flow graph clean.
 
-### 3.6 Grid position
+### 3.6 Layout position
 
-Each agent optionally declares its position on the visual editor grid:
+Each agent may declare a persisted layout position:
 
 ```yaml
 position: [x, y]
 ```
 
-These are grid coordinates (integers), not pixel values. The visual editor maps
-them to screen positions. When not specified, the editor auto-layouts using a
-graph layout algorithm (Dagre).
+These are integer grid coordinates, not pixel values. The browser editor treats
+them as a cache of the automatic ELK layered layout: on load or flow update it
+recomputes the layout from the graph structure and writes updated positions back
+to the markdown only when they change.
 
 ---
 
@@ -374,7 +378,7 @@ The Go binary dispatches code blocks to language-specific executors:
 │  flow (Go binary)                        │
 │                                          │
 │  ┌─────────────┐                         │
-│  │ prompt node  │ → LLM API (HTTP)       │
+│  │ prompt node  │ → configured backend   │
 │  ├─────────────┤                         │
 │  │ bash node    │ → sh -c (built-in)     │
 │  ├─────────────┤                         │
@@ -394,10 +398,13 @@ Each executor follows the same contract:
 3. Return output as JSON on stdout
 4. Non-zero exit code = agent failure
 
-Language support is pluggable. The core binary ships with LLM prompt execution
-and bash. Other languages are optional — only needed if the flow contains code
-blocks in that language. The runtime should error clearly if a flow uses a
-language whose executor is not available.
+Language support is pluggable. The core binary ships with prompt execution,
+bash, and python. Prompt execution is selected with `prompt_executor`:
+`codex_cli` runs `codex exec` headlessly using local Codex auth, while
+`anthropic_api` and `openai_api` call provider HTTP APIs directly. Other
+languages are optional — only needed if the flow contains code blocks in that
+language. The runtime should error clearly if a flow uses a language whose
+executor is not available.
 
 ### 5.4 Failure handling
 
@@ -460,22 +467,23 @@ Both directions must preserve content that the other side doesn't understand
 ### 6.3 Technology
 
 - **Frontend**: React Flow — purpose-built library for node-based flow editors.
-  Provides drag-and-drop, connection drawing, grid snapping, and zoom/pan.
+  Provides graph rendering, grid background, controls, and zoom/pan.
 - **Backend**: Go HTTP server + WebSocket. Serves the React app as embedded
   static files via Go's `embed.FS`. No Node.js required at runtime.
-- **Layout**: Grid-based. Positions stored as integer grid coordinates in each
-  agent's YAML config. Auto-layout via Dagre algorithm when positions are absent.
+- **Layout**: Automatic ELK layered layout with fixed data/control ports.
+  Positions are stored as integer grid coordinates in each agent's YAML config
+  as the persisted layout output.
 
 ### 6.4 Editor capabilities
 
 | Capability                  | Description                                          |
 |-----------------------------|------------------------------------------------------|
-| Drag blocks                 | Move agent nodes on a snapped grid                   |
-| Draw connections            | Wire agent outputs to downstream inputs              |
+| Automatic layout            | Arrange nodes from graph structure using ELK         |
+| Live graph                  | Show data/control edges and run status               |
 | Edit config                 | Click a node to edit its YAML config and prompt       |
 | Add nodes                   | Create new agent blocks                              |
 | Delete nodes/connections    | Remove agents or connections                         |
-| Auto-layout                 | Arrange nodes automatically when positions are absent |
+| Persisted positions         | Store ELK output as markdown grid coordinates         |
 
 All changes round-trip to the markdown file.
 
@@ -486,7 +494,8 @@ All changes round-trip to the markdown file.
 ### 7.1 Commands
 
 ```
-flow run <file>              Execute a flow
+flow run <file>              Start a flow in the background and print UI link
+flow run -f <file>           Execute a flow in foreground with live progress
 flow chart <file>            Open visual editor in browser
 flow validate <file>         Validate a flow without executing
 flow viz <file>              Output flow graph as Mermaid or DOT
@@ -496,6 +505,7 @@ flow viz <file>              Output flow graph as Mermaid or DOT
 
 | Flag                        | Description                                      |
 |-----------------------------|--------------------------------------------------|
+| `-f`, `--foreground`        | Run in foreground and print live progress        |
 | `--input name=value`        | Provide an external input (repeatable)           |
 | `--input name=@filepath`    | Provide an external input from a file            |
 | `--verbose`                 | Print agent execution details                    |
@@ -621,16 +631,17 @@ For flows with 15+ agents, a single markdown file becomes unwieldy. An
 `include` directive in the frontmatter could compose a flow from multiple files.
 Design this when the need arises — don't build it speculatively.
 
-### 10.3 LLM API configuration
+### 10.3 Prompt executor configuration
 
-The flow needs to know which LLM provider to call and how to authenticate. This
-could be:
+The flow needs to know which prompt executor to use and how to authenticate.
+This could be:
+- Local Codex auth for `prompt_executor: codex_cli`
 - Environment variables (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
 - A config file (`~/.flow/config.yaml`)
 - Per-flow frontmatter
 
-Recommendation: environment variables for API keys (standard practice), flow
-frontmatter for model selection and parameters.
+Recommendation: flow frontmatter for executor/model selection, local Codex auth
+for `codex_cli`, and environment variables for direct API keys.
 
 ---
 

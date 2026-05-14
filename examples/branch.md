@@ -3,6 +3,10 @@ name: Conditional Branch
 description: Reviewer approves or requests changes, different paths fire
 external_inputs:
   - decision
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## reviewer

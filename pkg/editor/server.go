@@ -96,22 +96,24 @@ type FlowJSON struct {
 }
 
 type DefaultsJSON struct {
-	Model       string  `json:"model,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
+	PromptExecutor string  `json:"prompt_executor,omitempty"`
+	Model          string  `json:"model,omitempty"`
+	Temperature    float64 `json:"temperature,omitempty"`
 }
 
 type AgentJSON struct {
-	Name         string               `json:"name"`
-	Position     [2]int               `json:"position"`
-	Inputs       map[string]InputJSON `json:"inputs"`
-	Start        []ConditionJSON      `json:"start"`
-	NodeType     string               `json:"node_type"`
-	Language     string               `json:"language,omitempty"`
-	Content      string               `json:"content"`
-	Model        string               `json:"model,omitempty"`
-	Temperature  float64              `json:"temperature,omitempty"`
-	OnError      string               `json:"on_error,omitempty"`
-	OnExhaustion string               `json:"on_exhaustion,omitempty"`
+	Name           string               `json:"name"`
+	Position       [2]int               `json:"position"`
+	Inputs         map[string]InputJSON `json:"inputs"`
+	Start          []ConditionJSON      `json:"start"`
+	NodeType       string               `json:"node_type"`
+	Language       string               `json:"language,omitempty"`
+	Content        string               `json:"content"`
+	PromptExecutor string               `json:"prompt_executor,omitempty"`
+	Model          string               `json:"model,omitempty"`
+	Temperature    float64              `json:"temperature,omitempty"`
+	OnError        string               `json:"on_error,omitempty"`
+	OnExhaustion   string               `json:"on_exhaustion,omitempty"`
 }
 
 type InputJSON struct {
@@ -416,8 +418,9 @@ func flowToJSON(flow *model.Flow) FlowJSON {
 		Description:    flow.Description,
 		ExternalInputs: flow.ExternalInputs,
 		Defaults: DefaultsJSON{
-			Model:       flow.Defaults.Model,
-			Temperature: flow.Defaults.Temperature,
+			PromptExecutor: flow.Defaults.PromptExecutor,
+			Model:          flow.Defaults.Model,
+			Temperature:    flow.Defaults.Temperature,
 		},
 		Agents: agents,
 	}
@@ -449,17 +452,18 @@ func agentToJSON(a *model.Agent) AgentJSON {
 	}
 
 	return AgentJSON{
-		Name:         a.Name,
-		Position:     a.Position,
-		Inputs:       inputs,
-		Start:        conditions,
-		NodeType:     nodeType,
-		Language:     a.Language,
-		Content:      a.Content,
-		Model:        a.Model,
-		Temperature:  a.Temperature,
-		OnError:      a.OnError,
-		OnExhaustion: a.OnExhaustion,
+		Name:           a.Name,
+		Position:       a.Position,
+		Inputs:         inputs,
+		Start:          conditions,
+		NodeType:       nodeType,
+		Language:       a.Language,
+		Content:        a.Content,
+		PromptExecutor: a.PromptExecutor,
+		Model:          a.Model,
+		Temperature:    a.Temperature,
+		OnError:        a.OnError,
+		OnExhaustion:   a.OnExhaustion,
 	}
 }
 
@@ -473,8 +477,9 @@ func jsonToFlow(fj *FlowJSON) *model.Flow {
 		Description:    fj.Description,
 		ExternalInputs: fj.ExternalInputs,
 		Defaults: model.Defaults{
-			Model:       fj.Defaults.Model,
-			Temperature: fj.Defaults.Temperature,
+			PromptExecutor: fj.Defaults.PromptExecutor,
+			Model:          fj.Defaults.Model,
+			Temperature:    fj.Defaults.Temperature,
 		},
 		Agents: agents,
 	}
@@ -506,16 +511,17 @@ func jsonToAgent(aj *AgentJSON) model.Agent {
 	}
 
 	return model.Agent{
-		Name:         aj.Name,
-		Position:     aj.Position,
-		Inputs:       inputs,
-		Start:        conditions,
-		NodeType:     nodeType,
-		Language:     aj.Language,
-		Content:      aj.Content,
-		Model:        aj.Model,
-		Temperature:  aj.Temperature,
-		OnError:      aj.OnError,
-		OnExhaustion: aj.OnExhaustion,
+		Name:           aj.Name,
+		Position:       aj.Position,
+		Inputs:         inputs,
+		Start:          conditions,
+		NodeType:       nodeType,
+		Language:       aj.Language,
+		Content:        aj.Content,
+		PromptExecutor: aj.PromptExecutor,
+		Model:          aj.Model,
+		Temperature:    aj.Temperature,
+		OnError:        aj.OnError,
+		OnExhaustion:   aj.OnExhaustion,
 	}
 }

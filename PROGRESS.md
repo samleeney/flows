@@ -33,6 +33,8 @@
 - [x] React Flow frontend (`ui/`)
 - [x] Bi-directional sync (browser <-> file)
 - [x] `flow chart` command
+- [x] ELK layered auto-layout with explicit data/control ports and persisted
+      markdown positions
 - [x] Tests: 3 passing
 
 ### Phase 4: Polish and extensibility
@@ -47,28 +49,43 @@
 - [x] `flow run` supports `--llm-provider`, `--model`, `--max-tokens`, and
       `--llm-timeout`; API keys come from `ANTHROPIC_API_KEY` or
       `OPENAI_API_KEY`
+- [x] `flow run` prints a browser UI link, starts runs in the background by
+      default, and supports `-f`/`--foreground` for live terminal progress
+- [x] Prompt executor backend is configurable per flow or agent via
+      `prompt_executor`, including `codex_cli` headless execution through
+      `codex exec`
 - [x] CLI-level E2E tests covering function pipelines, conditional branches,
       mixed bash/python flows, mocked LLM prompt execution, and missing input
       failures
+- [x] Realistic JAX optimization-loop example and E2E test: speed optimizer,
+      memory optimizer, waste reducer, then benchmark feedback loop until the
+      candidate meets a runtime target
+- [x] Checked-in examples default to `prompt_executor: codex_cli` with
+      `model: gpt-5.3-codex-spark` for quick local headless execution
 
-**All phases complete.** Prompt nodes now execute against real LLM APIs when
-configured with a model and API key. Function-only flows still run without LLM
-credentials.
+**All phases complete.** Prompt nodes now execute through configurable
+backends: local Codex headless execution or direct provider APIs. Function-only
+flows still run without LLM credentials.
 
 ## Summary
 
 CLI commands:
-- `flow run <file>` — execute a flow
+- `flow run <file>` — start a flow in the background and print the browser UI link
+- `flow run -f <file>` — execute a flow in the foreground with live progress
 - `flow validate <file>` — validate without executing
 - `flow viz <file>` — output Mermaid diagram
 - `flow chart <file>` — open visual editor in browser
 
 Build: `make build` produces a single binary with embedded frontend.
 
-LLM configuration for prompt nodes:
+Prompt-node configuration:
+- Set `defaults.prompt_executor` or per-agent `prompt_executor`.
+- `codex_cli` uses local `codex exec` headless auth, with no API key required.
+- `anthropic_api` and `openai_api` call provider HTTP APIs directly.
 - Set `defaults.model` in flow frontmatter or `model` on an individual agent.
 - Set `ANTHROPIC_API_KEY` for Claude models or `OPENAI_API_KEY` for OpenAI
-  models.
+  models when using direct API executors.
 - Optional environment overrides: `FLOW_LLM_PROVIDER`, `FLOW_MODEL`,
-  `FLOW_MAX_TOKENS`, `FLOW_LLM_TIMEOUT`, `ANTHROPIC_BASE_URL`,
-  `ANTHROPIC_VERSION`, `OPENAI_BASE_URL`.
+  `FLOW_PROMPT_EXECUTOR`, `FLOW_MAX_TOKENS`, `FLOW_LLM_TIMEOUT`,
+  `FLOW_CODEX_COMMAND`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`,
+  `OPENAI_BASE_URL`.

@@ -3,6 +3,10 @@ name: Test Flow
 description: Simple three-node test
 external_inputs:
     - name
+defaults:
+    prompt_executor: codex_cli
+    model: gpt-5.3-codex-spark
+    temperature: 0.2
 ---
 
 ## greet

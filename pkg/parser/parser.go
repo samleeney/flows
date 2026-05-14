@@ -169,13 +169,14 @@ func splitSections(body []byte) []section {
 
 // agentConfig is the raw YAML config block for an agent.
 type agentConfig struct {
-	Position     [2]int                 `yaml:"position"`
-	Inputs       map[string]model.Input `yaml:"inputs"`
-	Start        []model.Condition      `yaml:"start"`
-	Model        string                 `yaml:"model"`
-	Temperature  float64                `yaml:"temperature"`
-	OnError      string                 `yaml:"on_error"`
-	OnExhaustion string                 `yaml:"on_exhaustion"`
+	Position       [2]int                 `yaml:"position"`
+	Inputs         map[string]model.Input `yaml:"inputs"`
+	Start          []model.Condition      `yaml:"start"`
+	PromptExecutor string                 `yaml:"prompt_executor"`
+	Model          string                 `yaml:"model"`
+	Temperature    float64                `yaml:"temperature"`
+	OnError        string                 `yaml:"on_error"`
+	OnExhaustion   string                 `yaml:"on_exhaustion"`
 }
 
 // parseSection extracts the first ```yaml code block as config, then determines
@@ -201,6 +202,7 @@ func parseSection(sec section) (model.Agent, error) {
 		agent.Inputs = make(map[string]model.Input)
 	}
 	agent.Start = cfg.Start
+	agent.PromptExecutor = cfg.PromptExecutor
 	agent.Model = cfg.Model
 	agent.Temperature = cfg.Temperature
 	agent.OnError = cfg.OnError

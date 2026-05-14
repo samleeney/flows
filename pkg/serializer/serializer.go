@@ -44,7 +44,7 @@ func writeFrontmatter(buf *bytes.Buffer, flow *model.Flow) error {
 		Description:    flow.Description,
 		ExternalInputs: flow.ExternalInputs,
 	}
-	if flow.Defaults.Model != "" || flow.Defaults.Temperature != 0 {
+	if flow.Defaults.PromptExecutor != "" || flow.Defaults.Model != "" || flow.Defaults.Temperature != 0 {
 		fm.Defaults = &flow.Defaults
 	}
 
@@ -61,13 +61,14 @@ func writeFrontmatter(buf *bytes.Buffer, flow *model.Flow) error {
 
 // agentConfig is the YAML config block for an agent.
 type agentConfig struct {
-	Position     [2]int                 `yaml:"position,omitempty,flow"`
-	Inputs       map[string]model.Input `yaml:"inputs,omitempty"`
-	Start        []model.Condition      `yaml:"start,omitempty"`
-	Model        string                 `yaml:"model,omitempty"`
-	Temperature  float64                `yaml:"temperature,omitempty"`
-	OnError      string                 `yaml:"on_error,omitempty"`
-	OnExhaustion string                 `yaml:"on_exhaustion,omitempty"`
+	Position       [2]int                 `yaml:"position,omitempty,flow"`
+	Inputs         map[string]model.Input `yaml:"inputs,omitempty"`
+	Start          []model.Condition      `yaml:"start,omitempty"`
+	PromptExecutor string                 `yaml:"prompt_executor,omitempty"`
+	Model          string                 `yaml:"model,omitempty"`
+	Temperature    float64                `yaml:"temperature,omitempty"`
+	OnError        string                 `yaml:"on_error,omitempty"`
+	OnExhaustion   string                 `yaml:"on_exhaustion,omitempty"`
 }
 
 func writeAgent(buf *bytes.Buffer, agent *model.Agent) error {
@@ -76,13 +77,14 @@ func writeAgent(buf *bytes.Buffer, agent *model.Agent) error {
 
 	// YAML config block
 	cfg := agentConfig{
-		Position:     agent.Position,
-		Inputs:       agent.Inputs,
-		Start:        agent.Start,
-		Model:        agent.Model,
-		Temperature:  agent.Temperature,
-		OnError:      agent.OnError,
-		OnExhaustion: agent.OnExhaustion,
+		Position:       agent.Position,
+		Inputs:         agent.Inputs,
+		Start:          agent.Start,
+		PromptExecutor: agent.PromptExecutor,
+		Model:          agent.Model,
+		Temperature:    agent.Temperature,
+		OnError:        agent.OnError,
+		OnExhaustion:   agent.OnExhaustion,
 	}
 
 	// Only include inputs if non-empty

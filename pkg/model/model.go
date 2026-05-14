@@ -12,8 +12,9 @@ type Flow struct {
 
 // Defaults holds flow-level default configuration inherited by all agents.
 type Defaults struct {
-	Model       string  `yaml:"model"`
-	Temperature float64 `yaml:"temperature"`
+	PromptExecutor string  `yaml:"prompt_executor"`
+	Model          string  `yaml:"model"`
+	Temperature    float64 `yaml:"temperature"`
 }
 
 // Agent represents a single agent node in the flow.
@@ -26,10 +27,11 @@ type Agent struct {
 	Language string // empty for prompt nodes; "python", "bash", etc. for function nodes
 	Content  string // the prompt text or code
 	// Per-agent config overrides
-	Model         string  `yaml:"model"`
-	Temperature   float64 `yaml:"temperature"`
-	OnError       string  `yaml:"on_error"`
-	OnExhaustion  string  `yaml:"on_exhaustion"`
+	PromptExecutor string  `yaml:"prompt_executor"`
+	Model          string  `yaml:"model"`
+	Temperature    float64 `yaml:"temperature"`
+	OnError        string  `yaml:"on_error"`
+	OnExhaustion   string  `yaml:"on_exhaustion"`
 }
 
 // Input represents a data source for an agent input.

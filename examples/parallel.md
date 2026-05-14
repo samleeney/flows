@@ -3,6 +3,10 @@ name: Parallel Fan-Out
 description: One source splits into three parallel workers, then joins
 external_inputs:
   - input
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## source

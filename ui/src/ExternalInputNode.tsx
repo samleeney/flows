@@ -1,7 +1,7 @@
 import { Handle, Position } from "@xyflow/react";
 
 interface ExternalInputNodeProps {
-  data: { name: string };
+  data: { name: string; isInput?: boolean };
 }
 
 export function ExternalInputNode({ data }: ExternalInputNodeProps) {
@@ -21,6 +21,24 @@ export function ExternalInputNode({ data }: ExternalInputNodeProps) {
         minWidth: 60,
       }}
     >
+      {data.isInput && (
+        <span
+          title="External input"
+          style={{
+            border: "1px solid #93c5fd",
+            borderRadius: 4,
+            background: "#dbeafe",
+            color: "#1d4ed8",
+            fontSize: 9,
+            fontWeight: 800,
+            lineHeight: "12px",
+            padding: "1px 4px",
+            letterSpacing: 0.4,
+          }}
+        >
+          INPUT
+        </span>
+      )}
       <svg
         width="11"
         height="13"

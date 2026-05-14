@@ -156,13 +156,18 @@ func TestSerializeMinimalFlow(t *testing.T) {
 	flow := &model.Flow{
 		Name:           "Minimal",
 		ExternalInputs: []string{"data"},
+		Defaults: model.Defaults{
+			PromptExecutor: "codex_cli",
+			Model:          "gpt-5.3-codex-spark",
+		},
 		Agents: []model.Agent{
 			{
-				Name:     "worker",
-				NodeType: model.PromptNode,
-				Inputs:   map[string]model.Input{"data": {From: "external"}},
-				Start:    []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
-				Content:  "Do the work.",
+				Name:           "worker",
+				NodeType:       model.PromptNode,
+				PromptExecutor: "anthropic_api",
+				Inputs:         map[string]model.Input{"data": {From: "external"}},
+				Start:          []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+				Content:        "Do the work.",
 			},
 		},
 	}
@@ -180,10 +185,19 @@ func TestSerializeMinimalFlow(t *testing.T) {
 	if flow2.Name != "Minimal" {
 		t.Errorf("name: got %q, want %q", flow2.Name, "Minimal")
 	}
+	if flow2.Defaults.PromptExecutor != "codex_cli" {
+		t.Errorf("defaults.prompt_executor: got %q, want codex_cli", flow2.Defaults.PromptExecutor)
+	}
+	if flow2.Defaults.Model != "gpt-5.3-codex-spark" {
+		t.Errorf("defaults.model: got %q, want gpt-5.3-codex-spark", flow2.Defaults.Model)
+	}
 	if len(flow2.Agents) != 1 {
 		t.Fatalf("agents: got %d, want 1", len(flow2.Agents))
 	}
 	if flow2.Agents[0].Name != "worker" {
 		t.Errorf("agent name: got %q, want %q", flow2.Agents[0].Name, "worker")
+	}
+	if flow2.Agents[0].PromptExecutor != "anthropic_api" {
+		t.Errorf("agent prompt_executor: got %q, want anthropic_api", flow2.Agents[0].PromptExecutor)
 	}
 }

@@ -3,6 +3,10 @@ name: Loop Exhaustion
 description: Loop that hits max_runs without satisfying exit condition
 external_inputs:
   - value
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+  temperature: 0.2
 ---
 
 ## checker
