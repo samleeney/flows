@@ -38,6 +38,9 @@ func Run(ctx context.Context, flow *model.Flow, registry *ExecutorRegistry, opts
 	if opts.ExternalInputs == nil {
 		opts.ExternalInputs = make(map[string]string)
 	}
+	if missing := missingExternalInputs(flow, opts.ExternalInputs); len(missing) > 0 {
+		return nil, fmt.Errorf("missing external input(s): %s", strings.Join(missing, ", "))
+	}
 	if opts.Observer == nil {
 		opts.Observer = live.NopObserver{}
 	}
@@ -97,6 +100,9 @@ func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
 	for {
 		ready := s.findReady()
 		if len(ready) == 0 {
+			if err = s.exhaustionError(); err != nil {
+				return nil, err
+			}
 			break
 		}
 
@@ -133,6 +139,16 @@ func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
 	return result, nil
 }
 
+func missingExternalInputs(flow *model.Flow, inputs map[string]string) []string {
+	var missing []string
+	for _, name := range flow.ExternalInputs {
+		if _, ok := inputs[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
 // findReady returns agents whose start conditions are met and inputs are
 // available. Thread-safe.
 func (s *flowState) findReady() []*model.Agent {
@@ -161,8 +177,8 @@ func (s *flowState) canFire(agent *model.Agent) bool {
 		return false
 	}
 
-	for _, input := range agent.Inputs {
-		if !s.inputAvailable(&input) {
+	for name, input := range agent.Inputs {
+		if !s.inputAvailable(name, &input) {
 			return false
 		}
 	}
@@ -205,10 +221,10 @@ func (s *flowState) conditionMet(agentName string, cond *model.Condition) bool {
 	return false
 }
 
-func (s *flowState) inputAvailable(input *model.Input) bool {
+func (s *flowState) inputAvailable(name string, input *model.Input) bool {
 	if input.From == "external" {
-		_, ok := s.opts.ExternalInputs[input.From]
-		return true || ok
+		_, ok := s.opts.ExternalInputs[name]
+		return ok
 	}
 
 	_, hasOutput := s.outputs[input.From]
@@ -217,7 +233,8 @@ func (s *flowState) inputAvailable(input *model.Input) bool {
 	}
 
 	if input.Fallback == "external" {
-		return true
+		_, ok := s.opts.ExternalInputs[name]
+		return ok
 	}
 	if input.Fallback != "" {
 		_, hasFallback := s.outputs[input.Fallback]
@@ -225,6 +242,82 @@ func (s *flowState) inputAvailable(input *model.Input) bool {
 	}
 
 	return false
+}
+
+func (s *flowState) exhaustionError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.flow.Agents {
+		agent := &s.flow.Agents[i]
+		for _, cond := range agent.Start {
+			if !s.conditionExhausted(agent, &cond) {
+				continue
+			}
+			policy := exhaustionPolicy(agent, &cond)
+			switch policy {
+			case "", "stop":
+				return fmt.Errorf("agent %q exhausted max_runs=%d for start condition %s", agent.Name, cond.MaxRuns, conditionLabel(&cond))
+			case "continue":
+				continue
+			default:
+				return fmt.Errorf("agent %q exhausted max_runs=%d with unsupported on_exhaustion policy %q", agent.Name, cond.MaxRuns, policy)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *flowState) conditionExhausted(agent *model.Agent, cond *model.Condition) bool {
+	if cond.MaxRuns <= 0 || len(cond.When) == 0 || s.runs[agent.Name] < cond.MaxRuns {
+		return false
+	}
+	if !s.conditionMetIgnoringMaxRuns(agent.Name, cond) {
+		return false
+	}
+	for name, input := range agent.Inputs {
+		if !s.inputAvailable(name, &input) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *flowState) conditionMetIgnoringMaxRuns(agentName string, cond *model.Condition) bool {
+	for _, dep := range cond.When {
+		output, hasOutput := s.outputs[dep]
+		if !hasOutput {
+			return false
+		}
+		if cond.Contains != "" && !strings.Contains(output, cond.Contains) {
+			return false
+		}
+		depRuns := s.runs[dep]
+		consumed := s.consumed[agentName][dep]
+		if depRuns <= consumed {
+			return false
+		}
+	}
+	return true
+}
+
+func exhaustionPolicy(agent *model.Agent, cond *model.Condition) string {
+	if cond.OnExhaustion != "" {
+		return strings.ToLower(strings.TrimSpace(cond.OnExhaustion))
+	}
+	return strings.ToLower(strings.TrimSpace(agent.OnExhaustion))
+}
+
+func conditionLabel(cond *model.Condition) string {
+	if len(cond.When) == 0 {
+		return "unknown"
+	}
+	label := "when " + strings.Join(cond.When, ",")
+	if cond.Contains != "" {
+		label += " contains " + cond.Contains
+	}
+	return label
 }
 
 func (s *flowState) resolveInputs(agent *model.Agent) map[string]string {

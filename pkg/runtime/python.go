@@ -27,6 +27,7 @@ func (p *PythonExecutor) Execute(ctx context.Context, content string, inputs map
 
 	wrapper := fmt.Sprintf(`import json as _json, sys as _sys
 _inputs = _json.loads(%q)
+inputs = _inputs
 for _k, _v in _inputs.items():
     exec(f"{_k} = _json.loads({_json.dumps(_v)!r})" if _v.startswith(("{","[")) else f"{_k} = {_v!r}")
 output = None

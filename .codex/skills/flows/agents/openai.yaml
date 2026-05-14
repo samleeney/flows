@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flows"
+  short_description: "Write and run markdown agent flows"
+  default_prompt: "Use $flows to write and run a markdown agent flow with prompt steps, code blocks, inputs, outputs, loops, and browser visualization."

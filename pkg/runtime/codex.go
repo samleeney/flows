@@ -12,16 +12,21 @@ import (
 const (
 	PromptExecutorCodexCLI      = "codex_cli"
 	PromptExecutorCodexHeadless = "codex_headless"
+	PromptExecutorCodexCLIWrite = "codex_cli_write"
 	DefaultCodexCommand         = "codex"
 	DefaultCodexModel           = "gpt-5.3-codex-spark"
+	DefaultCodexSandbox         = "read-only"
+	DefaultCodexWriteSandbox    = "workspace-write"
 )
 
 // CodexCLIConfig configures the headless Codex CLI prompt executor.
 type CodexCLIConfig struct {
-	Command string
-	Model   string
-	WorkDir string
-	Timeout time.Duration
+	Command    string
+	Model      string
+	WorkDir    string
+	Timeout    time.Duration
+	Sandbox    string
+	AllowEdits bool
 }
 
 // CodexCLIExecutor executes prompt nodes through `codex exec`, using the
@@ -36,6 +41,9 @@ func NewCodexCLIExecutor(cfg CodexCLIConfig) *CodexCLIExecutor {
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultPromptTimeout
+	}
+	if cfg.Sandbox == "" {
+		cfg.Sandbox = DefaultCodexSandbox
 	}
 	return &CodexCLIExecutor{cfg: cfg}
 }
@@ -56,7 +64,7 @@ func (e *CodexCLIExecutor) ExecuteAgent(ctx context.Context, req ExecutionReques
 		model = DefaultCodexModel
 	}
 
-	prompt := buildCodexPrompt(req)
+	prompt := e.buildCodexPrompt(req)
 	outFileHandle, err := os.CreateTemp("", "flow-codex-*.txt")
 	if err != nil {
 		return "", fmt.Errorf("creating codex output file: %w", err)
@@ -70,7 +78,7 @@ func (e *CodexCLIExecutor) ExecuteAgent(ctx context.Context, req ExecutionReques
 
 	args := []string{
 		"exec",
-		"--sandbox", "read-only",
+		"--sandbox", e.cfg.Sandbox,
 		"--skip-git-repo-check",
 		"--ephemeral",
 		"--color", "never",
@@ -108,7 +116,11 @@ func (e *CodexCLIExecutor) ExecuteAgent(ctx context.Context, req ExecutionReques
 	return output, nil
 }
 
-func buildCodexPrompt(req ExecutionRequest) string {
+func (e *CodexCLIExecutor) buildCodexPrompt(req ExecutionRequest) string {
 	systemPrompt, userPrompt := buildLLMPrompt(req)
-	return systemPrompt + "\n\nDo not edit files. Do not apply patches. Return only the final node output requested by the node prompt.\n\n" + userPrompt
+	editPolicy := "Do not edit files. Do not apply patches. Return only the final node output requested by the node prompt."
+	if e.cfg.AllowEdits {
+		editPolicy = "You may edit files in the workspace only when the node prompt explicitly asks for file changes. Return a concise final node output describing the result requested by the node prompt."
+	}
+	return systemPrompt + "\n\n" + editPolicy + "\n\n" + userPrompt
 }

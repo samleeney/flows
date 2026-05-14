@@ -187,7 +187,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Print agent execution details")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate and show plan without running")
 	cmd.Flags().StringVar(&outDir, "output", "", "Directory to write agent outputs")
-	cmd.Flags().StringVar(&promptExecutor, "prompt-executor", os.Getenv("FLOW_PROMPT_EXECUTOR"), "Override prompt executor for all prompt nodes: codex_cli, anthropic_api, or openai_api")
+	cmd.Flags().StringVar(&promptExecutor, "prompt-executor", os.Getenv("FLOW_PROMPT_EXECUTOR"), "Override prompt executor for all prompt nodes: codex_cli, codex_cli_write, anthropic_api, or openai_api")
 	cmd.Flags().StringVar(&llmProvider, "llm-provider", os.Getenv("FLOW_LLM_PROVIDER"), "LLM provider for prompt nodes: anthropic or openai (default: infer from model)")
 	cmd.Flags().StringVar(&llmModel, "model", os.Getenv("FLOW_MODEL"), "Override model for all prompt nodes (default: flow/agent model)")
 	cmd.Flags().IntVar(&maxTokens, "max-tokens", envInt("FLOW_MAX_TOKENS", runtime.DefaultMaxTokens), "Maximum output tokens for prompt nodes")

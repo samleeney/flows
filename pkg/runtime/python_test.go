@@ -30,6 +30,20 @@ func TestPythonExecutorWithInputs(t *testing.T) {
 	}
 }
 
+func TestPythonExecutorExposesInputsMap(t *testing.T) {
+	exec := &PythonExecutor{}
+	out, err := exec.Execute(context.Background(),
+		`output = inputs["name"].upper()`,
+		map[string]string{"name": "World"},
+	)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out != "WORLD" {
+		t.Errorf("output = %q, want %q", out, "WORLD")
+	}
+}
+
 func TestPythonExecutorComputation(t *testing.T) {
 	exec := &PythonExecutor{}
 	out, err := exec.Execute(context.Background(),

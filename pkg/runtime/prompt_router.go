@@ -14,7 +14,7 @@ const (
 // PromptRouterConfig configures prompt execution backends.
 type PromptRouterConfig struct {
 	// DefaultExecutor overrides flow/agent prompt_executor when set. Accepted
-	// values include codex_cli, anthropic_api, and openai_api.
+	// values include codex_cli, codex_cli_write, anthropic_api, and openai_api.
 	DefaultExecutor string
 
 	HTTP  HTTPPromptConfig
@@ -28,6 +28,7 @@ type PromptRouterExecutor struct {
 	anthropic       *HTTPPromptExecutor
 	openai          *HTTPPromptExecutor
 	codex           *CodexCLIExecutor
+	codexWrite      *CodexCLIExecutor
 }
 
 func NewPromptRouterExecutor(cfg PromptRouterConfig) *PromptRouterExecutor {
@@ -35,12 +36,16 @@ func NewPromptRouterExecutor(cfg PromptRouterConfig) *PromptRouterExecutor {
 	anthropicCfg.Provider = ProviderAnthropic
 	openaiCfg := cfg.HTTP
 	openaiCfg.Provider = ProviderOpenAI
+	codexWriteCfg := cfg.Codex
+	codexWriteCfg.Sandbox = DefaultCodexWriteSandbox
+	codexWriteCfg.AllowEdits = true
 
 	return &PromptRouterExecutor{
 		defaultExecutor: normalizePromptExecutor(cfg.DefaultExecutor),
 		anthropic:       NewHTTPPromptExecutor(anthropicCfg),
 		openai:          NewHTTPPromptExecutor(openaiCfg),
 		codex:           NewCodexCLIExecutor(cfg.Codex),
+		codexWrite:      NewCodexCLIExecutor(codexWriteCfg),
 	}
 }
 
@@ -53,6 +58,8 @@ func (e *PromptRouterExecutor) ExecuteAgent(ctx context.Context, req ExecutionRe
 	switch executor {
 	case PromptExecutorCodexCLI:
 		return e.codex.ExecuteAgent(ctx, req)
+	case PromptExecutorCodexCLIWrite:
+		return e.codexWrite.ExecuteAgent(ctx, req)
 	case PromptExecutorAnthropicAPI:
 		return e.anthropic.ExecuteAgent(ctx, req)
 	case PromptExecutorOpenAIAPI:
@@ -95,6 +102,8 @@ func normalizePromptExecutor(value string) string {
 		return ""
 	case PromptExecutorCodexCLI, PromptExecutorCodexHeadless, "codex", "codex_exec":
 		return PromptExecutorCodexCLI
+	case PromptExecutorCodexCLIWrite, "codex_write", "codex_edit", "codex_workspace_write":
+		return PromptExecutorCodexCLIWrite
 	case PromptExecutorAnthropicAPI, ProviderAnthropic, "anthropic_http":
 		return PromptExecutorAnthropicAPI
 	case PromptExecutorOpenAIAPI, ProviderOpenAI, "openai_http":

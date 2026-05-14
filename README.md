@@ -47,6 +47,10 @@ That makes the document both readable and executable: fuzzy optimization steps
 are linked to a programmatic benchmark, and the benchmark controls whether the
 agent loop continues.
 
+For prompt nodes that should change files in the current repository, use
+`prompt_executor: codex_cli_write`. Plain `codex_cli` remains read-only and is
+best for text outputs such as reviews, summaries, and generated code snippets.
+
 ## Visualizing
 
 Every flow can be opened in the browser:

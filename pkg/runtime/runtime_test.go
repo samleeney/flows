@@ -93,6 +93,30 @@ func TestRunSimpleSequence(t *testing.T) {
 	}
 }
 
+func TestRunMissingExternalInputFails(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "MissingInput",
+		ExternalInputs: []string{"data"},
+		Agents: []model.Agent{
+			{
+				Name:     "step_one",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"data": {From: "external"}},
+				Start:    []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+				Content:  "Process the data.",
+			},
+		},
+	}
+
+	_, err := Run(context.Background(), flow, NewExecutorRegistry(&mockPromptExecutor{}), RunOptions{})
+	if err == nil {
+		t.Fatal("expected missing external input error")
+	}
+	if !strings.Contains(err.Error(), "missing external input(s): data") {
+		t.Fatalf("error = %v, want missing external input", err)
+	}
+}
+
 func TestRunPassesAgentConfigToAgentExecutor(t *testing.T) {
 	flow := &model.Flow{
 		Name:           "Configured",
@@ -252,6 +276,96 @@ func TestRunLoop(t *testing.T) {
 	}
 	if !strings.Contains(result.Outputs["reviewer"], "approved") {
 		t.Errorf("final reviewer output should contain approved, got %q", result.Outputs["reviewer"])
+	}
+}
+
+func TestRunLoopExhaustionFailsByDefault(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "Exhaustion",
+		ExternalInputs: []string{"code"},
+		Agents: []model.Agent{
+			{
+				Name:     "reviewer",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"code": {From: "fixer", Fallback: "external"}},
+				Start: []model.Condition{
+					{Always: &model.AlwaysCondition{MaxRuns: 1}},
+					{When: model.StringOrList{"fixer"}, MaxRuns: 2},
+				},
+				Content: "Review code.",
+			},
+			{
+				Name:     "fixer",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"feedback": {From: "reviewer"}},
+				Start:    []model.Condition{{When: model.StringOrList{"reviewer"}, Contains: "needs_changes"}},
+				Content:  "Fix issues.",
+			},
+		},
+	}
+
+	mock := &mockPromptExecutor{
+		responder: func(content string, inputs map[string]string) string {
+			if strings.Contains(content, "Review") {
+				return "needs_changes: still broken"
+			}
+			return "fixed code"
+		},
+	}
+
+	_, err := Run(context.Background(), flow, NewExecutorRegistry(mock), RunOptions{
+		ExternalInputs: map[string]string{"code": "buggy code"},
+	})
+	if err == nil {
+		t.Fatal("expected loop exhaustion error")
+	}
+	if !strings.Contains(err.Error(), `agent "reviewer" exhausted max_runs=2`) {
+		t.Fatalf("error = %v, want reviewer exhaustion", err)
+	}
+}
+
+func TestRunLoopExhaustionContinuePolicyAllowsCompletion(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "ExhaustionContinue",
+		ExternalInputs: []string{"code"},
+		Agents: []model.Agent{
+			{
+				Name:     "reviewer",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"code": {From: "fixer", Fallback: "external"}},
+				Start: []model.Condition{
+					{Always: &model.AlwaysCondition{MaxRuns: 1}},
+					{When: model.StringOrList{"fixer"}, MaxRuns: 2, OnExhaustion: "continue"},
+				},
+				Content: "Review code.",
+			},
+			{
+				Name:     "fixer",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"feedback": {From: "reviewer"}},
+				Start:    []model.Condition{{When: model.StringOrList{"reviewer"}, Contains: "needs_changes"}},
+				Content:  "Fix issues.",
+			},
+		},
+	}
+
+	mock := &mockPromptExecutor{
+		responder: func(content string, inputs map[string]string) string {
+			if strings.Contains(content, "Review") {
+				return "needs_changes: still broken"
+			}
+			return "fixed code"
+		},
+	}
+
+	result, err := Run(context.Background(), flow, NewExecutorRegistry(mock), RunOptions{
+		ExternalInputs: map[string]string{"code": "buggy code"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(result.Outputs["reviewer"], "needs_changes") {
+		t.Fatalf("reviewer output = %q, want needs_changes", result.Outputs["reviewer"])
 	}
 }
 
