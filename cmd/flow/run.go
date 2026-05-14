@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/samleeney/flows/pkg/live"
 	"github.com/samleeney/flows/pkg/parser"
 	"github.com/samleeney/flows/pkg/runtime"
 	"github.com/samleeney/flows/pkg/validator"
@@ -68,9 +69,19 @@ func newRunCmd() *cobra.Command {
 			prompt := &stubPromptExecutor{}
 			registry := runtime.NewExecutorRegistry(prompt, &runtime.BashExecutor{}, &runtime.PythonExecutor{})
 
+			// Discover any running editor for this flow file and build a
+			// best-effort live observer that fans out to all of them.
+			canonical, _ := live.CanonicalFlowPath(args[0])
+			flowKey := live.FlowKey(canonical)
+			descriptors, _ := live.DiscoverDescriptors(flowKey)
+			observer := buildLiveObserver(descriptors)
+			defer observer.Close()
+
 			opts := runtime.RunOptions{
 				ExternalInputs: externalInputs,
 				Verbose:        verbose,
+				FlowKey:        flowKey,
+				Observer:       observer,
 			}
 
 			if verbose {
@@ -130,4 +141,18 @@ type stubPromptExecutor struct{}
 
 func (s *stubPromptExecutor) Execute(_ context.Context, content string, inputs map[string]string) (string, error) {
 	return fmt.Sprintf("[stub] would send prompt (%d chars) with %d inputs to LLM", len(content), len(inputs)), nil
+}
+
+// buildLiveObserver returns a fan-out observer over discovered editor
+// descriptors. If none are present, a NopObserver is returned and live
+// reporting is silently disabled.
+func buildLiveObserver(descs []live.Descriptor) live.Observer {
+	if len(descs) == 0 {
+		return live.NopObserver{}
+	}
+	children := make([]live.Observer, 0, len(descs))
+	for _, d := range descs {
+		children = append(children, live.NewHTTPObserver(d.BaseURL, d.Token))
+	}
+	return live.NewFanoutObserver(children...)
 }

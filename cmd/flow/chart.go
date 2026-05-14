@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os/exec"
 	"runtime"
 
 	"github.com/samleeney/flows/pkg/editor"
+	"github.com/samleeney/flows/pkg/live"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +25,19 @@ func newChartCmd() *cobra.Command {
 		Short: "Open visual editor in browser",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			filePath := args[0]
+
+			canonical, err := live.CanonicalFlowPath(filePath)
+			if err != nil {
+				return fmt.Errorf("canonicalize: %w", err)
+			}
+			flowKey := live.FlowKey(canonical)
+
+			token, err := live.NewToken()
+			if err != nil {
+				return fmt.Errorf("generate token: %w", err)
+			}
+
 			var uiFS http.FileSystem
 			if uiDir != "" {
 				uiFS = http.Dir(uiDir)
@@ -30,7 +45,13 @@ func newChartCmd() *cobra.Command {
 				uiFS = embeddedUI()
 			}
 
-			srv, err := editor.NewServer(args[0], uiFS)
+			srv, err := editor.NewServer(editor.NewServerOptions{
+				FilePath:      filePath,
+				CanonicalPath: canonical,
+				FlowKey:       flowKey,
+				Token:         token,
+				UIFS:          uiFS,
+			})
 			if err != nil {
 				return fmt.Errorf("creating editor: %w", err)
 			}
@@ -40,17 +61,35 @@ func newChartCmd() *cobra.Command {
 				log.Printf("warning: file watcher failed: %v", err)
 			}
 
-			addr := fmt.Sprintf("localhost:%d", port)
-			url := fmt.Sprintf("http://%s", addr)
+			addr := fmt.Sprintf("127.0.0.1:%d", port)
+			ln, err := net.Listen("tcp", addr)
+			if err != nil {
+				return fmt.Errorf("bind %s: %w", addr, err)
+			}
 
-			fmt.Printf("Flow editor running at %s\n", url)
+			boundAddr := ln.Addr().(*net.TCPAddr)
+			baseURL := fmt.Sprintf("http://127.0.0.1:%d", boundAddr.Port)
+
+			cleanup, _, err := live.RegisterDescriptor(live.Descriptor{
+				BaseURL:       baseURL,
+				Token:         token,
+				FlowKey:       flowKey,
+				CanonicalPath: canonical,
+			})
+			if err != nil {
+				log.Printf("warning: live descriptor register failed: %v", err)
+			} else {
+				defer cleanup()
+			}
+
+			fmt.Printf("Flow editor running at %s\n", baseURL)
 			fmt.Println("Press Ctrl+C to stop.")
 
 			if !noOpen {
-				go openBrowser(url)
+				go openBrowser(baseURL)
 			}
 
-			return http.ListenAndServe(addr, srv.Handler())
+			return srv.Serve(ln)
 		},
 	}
 

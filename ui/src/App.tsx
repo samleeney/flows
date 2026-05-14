@@ -10,32 +10,45 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import type { FlowJSON } from "./types";
+import type {
+  FlowJSON,
+  LiveUIState,
+  RunSnapshot,
+  EventEnvelope,
+} from "./types";
 import { useFlowWebSocket } from "./useFlowWebSocket";
 import {
   flowToNodes,
   flowToEdges,
   autoLayout,
   nodesToFlow,
+  decorateNodes,
 } from "./flowToReactFlow";
 import { AgentNode, FunctionNode } from "./AgentNode";
+import { ExternalInputNode } from "./ExternalInputNode";
+import {
+  applyEvent,
+  applySnapshot,
+  emptyLiveState,
+} from "./runState";
 
 const nodeTypes = {
   agentNode: AgentNode,
   functionNode: FunctionNode,
+  externalInputNode: ExternalInputNode,
 };
 
 export default function App() {
   const [flow, setFlow] = useState<FlowJSON | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [liveState, setLiveState] = useState<LiveUIState>(emptyLiveState);
 
   const onFlowUpdate = useCallback((newFlow: FlowJSON) => {
     setFlow(newFlow);
     let newNodes = flowToNodes(newFlow);
     const newEdges = flowToEdges(newFlow);
 
-    // Auto-layout if all positions are [0,0]
     const allZero = newFlow.agents.every(
       (a) => a.position[0] === 0 && a.position[1] === 0
     );
@@ -47,14 +60,25 @@ export default function App() {
     setEdges(newEdges);
   }, []);
 
-  const { sendUpdate } = useFlowWebSocket(onFlowUpdate);
+  const onRunSnapshot = useCallback((snap: RunSnapshot) => {
+    setLiveState((cur) => applySnapshot(cur, snap));
+  }, []);
+
+  const onRunEvent = useCallback((env: EventEnvelope) => {
+    setLiveState((cur) => applyEvent(cur, env));
+  }, []);
+
+  const { sendUpdate } = useFlowWebSocket({
+    onFlowUpdate,
+    onRunSnapshot,
+    onRunEvent,
+  });
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       setNodes((nds) => {
         const updated = applyNodeChanges(changes, nds);
 
-        // If positions changed, sync back to server
         const hasPosChange = changes.some(
           (c) => c.type === "position" && "position" in c && c.position
         );
@@ -70,12 +94,11 @@ export default function App() {
     [flow, sendUpdate]
   );
 
-  const defaultEdgeOptions = useMemo(
-    () => ({
-      style: { strokeWidth: 2, stroke: "#64748b" },
-    }),
-    []
-  );
+  const decoratedNodes = useMemo(() => {
+    const runId = liveState.selectedRunId;
+    const run = runId ? liveState.runsById[runId] : undefined;
+    return decorateNodes(nodes, run?.agents);
+  }, [nodes, liveState]);
 
   if (!flow) {
     return (
@@ -93,6 +116,19 @@ export default function App() {
       </div>
     );
   }
+
+  const selectedRun = liveState.selectedRunId
+    ? liveState.runsById[liveState.selectedRunId]
+    : undefined;
+  const runStatusLabel = selectedRun
+    ? selectedRun.finished_at
+      ? selectedRun.ok
+        ? "run complete"
+        : selectedRun.disconnected
+        ? "run disconnected"
+        : "run failed"
+      : "running…"
+    : null;
 
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
@@ -115,13 +151,26 @@ export default function App() {
             {flow.description}
           </span>
         )}
+        {runStatusLabel && (
+          <span
+            style={{
+              marginLeft: 12,
+              fontSize: 11,
+              padding: "2px 8px",
+              borderRadius: 999,
+              background: "#f1f5f9",
+              color: "#475569",
+            }}
+          >
+            {runStatusLabel}
+          </span>
+        )}
       </div>
       <ReactFlow
-        nodes={nodes}
+        nodes={decoratedNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
-        defaultEdgeOptions={defaultEdgeOptions}
         snapToGrid
         snapGrid={[20, 20]}
         fitView

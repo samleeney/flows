@@ -2,53 +2,88 @@
 package editor
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/samleeney/flows/pkg/live"
 	"github.com/samleeney/flows/pkg/model"
 	"github.com/samleeney/flows/pkg/parser"
 	"github.com/samleeney/flows/pkg/serializer"
 )
 
-// Server is the editor backend.
-type Server struct {
-	filePath string
-	uiFS     http.FileSystem // built frontend assets
-	mu       sync.RWMutex
-	flow     *model.Flow
-	clients  map[*websocket.Conn]bool
-	clientMu sync.Mutex
-	upgrader websocket.Upgrader
-	watcher  *FileWatcher
+// NewServerOptions configures a new editor Server.
+type NewServerOptions struct {
+	FilePath      string          // path to the flow .md file
+	CanonicalPath string          // optional canonical path for live discovery
+	FlowKey       string          // optional sha256 of CanonicalPath
+	Token         string          // empty → live endpoints not registered
+	UIFS          http.FileSystem // nil → fallback placeholder index
 }
 
-// NewServer creates a new editor server for the given flow file.
-// uiFS is an optional http.FileSystem for serving the built frontend. If nil,
-// a placeholder page is served.
-func NewServer(filePath string, uiFS ...http.FileSystem) (*Server, error) {
-	flow, err := parser.ParseFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", filePath, err)
-	}
+// Server is the editor backend.
+type Server struct {
+	opts NewServerOptions
 
+	mu       sync.RWMutex
+	flow     *model.Flow
+	clientMu sync.Mutex
+	clients  map[*wsClient]struct{}
+	upgrader websocket.Upgrader
+	watcher  *FileWatcher
+
+	runStore *RunStore
+
+	httpServer *http.Server
+}
+
+// NewServer creates a new editor server.
+func NewServer(opts NewServerOptions) (*Server, error) {
+	if opts.FilePath == "" {
+		return nil, errors.New("editor: FilePath is required")
+	}
+	flow, err := parser.ParseFile(opts.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", opts.FilePath, err)
+	}
 	s := &Server{
-		filePath: filePath,
-		flow:     flow,
-		clients:  make(map[*websocket.Conn]bool),
+		opts:    opts,
+		flow:    flow,
+		clients: make(map[*wsClient]struct{}),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
+		runStore: NewRunStore(opts.FlowKey),
 	}
-	if len(uiFS) > 0 {
-		s.uiFS = uiFS[0]
-	}
-
 	return s, nil
+}
+
+// FlowKey returns the configured flow_key.
+func (s *Server) FlowKey() string { return s.opts.FlowKey }
+
+// CanonicalPath returns the configured canonical flow path.
+func (s *Server) CanonicalPath() string { return s.opts.CanonicalPath }
+
+// RunSnapshot returns the current state of the live run store.
+func (s *Server) RunSnapshot() RunSnapshot { return s.runStore.Snapshot() }
+
+// Serve binds the editor to the given listener and serves until Close is called.
+func (s *Server) Serve(ln net.Listener) error {
+	s.httpServer = &http.Server{Handler: s.Handler()}
+	err := s.httpServer.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 // FlowJSON is the JSON representation sent to the frontend.
@@ -60,34 +95,30 @@ type FlowJSON struct {
 	Agents         []AgentJSON  `json:"agents"`
 }
 
-// DefaultsJSON mirrors model.Defaults.
 type DefaultsJSON struct {
 	Model       string  `json:"model,omitempty"`
 	Temperature float64 `json:"temperature,omitempty"`
 }
 
-// AgentJSON is the JSON representation of an agent for the frontend.
 type AgentJSON struct {
-	Name         string                 `json:"name"`
-	Position     [2]int                 `json:"position"`
-	Inputs       map[string]InputJSON   `json:"inputs"`
-	Start        []ConditionJSON        `json:"start"`
-	NodeType     string                 `json:"node_type"`
-	Language     string                 `json:"language,omitempty"`
-	Content      string                 `json:"content"`
-	Model        string                 `json:"model,omitempty"`
-	Temperature  float64                `json:"temperature,omitempty"`
-	OnError      string                 `json:"on_error,omitempty"`
-	OnExhaustion string                 `json:"on_exhaustion,omitempty"`
+	Name         string               `json:"name"`
+	Position     [2]int               `json:"position"`
+	Inputs       map[string]InputJSON `json:"inputs"`
+	Start        []ConditionJSON      `json:"start"`
+	NodeType     string               `json:"node_type"`
+	Language     string               `json:"language,omitempty"`
+	Content      string               `json:"content"`
+	Model        string               `json:"model,omitempty"`
+	Temperature  float64              `json:"temperature,omitempty"`
+	OnError      string               `json:"on_error,omitempty"`
+	OnExhaustion string               `json:"on_exhaustion,omitempty"`
 }
 
-// InputJSON is the JSON representation of an input.
 type InputJSON struct {
 	From     string `json:"from"`
 	Fallback string `json:"fallback,omitempty"`
 }
 
-// ConditionJSON is the JSON representation of a start condition.
 type ConditionJSON struct {
 	Always       *AlwaysJSON `json:"always,omitempty"`
 	When         []string    `json:"when,omitempty"`
@@ -96,7 +127,6 @@ type ConditionJSON struct {
 	OnExhaustion string      `json:"on_exhaustion,omitempty"`
 }
 
-// AlwaysJSON is the JSON representation of an always condition.
 type AlwaysJSON struct {
 	MaxRuns int `json:"max_runs"`
 }
@@ -107,14 +137,18 @@ type WSMessage struct {
 	Data json.RawMessage `json:"data"`
 }
 
-// Handler returns an http.Handler for the editor.
+// Handler returns the http.Handler for the editor.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/flow", s.handleFlow)
 	mux.HandleFunc("/ws", s.handleWebSocket)
-	if s.uiFS != nil {
-		// Serve built React app
-		mux.Handle("/", http.FileServer(s.uiFS))
+	mux.HandleFunc("/api/live/runs", s.handleLiveRuns)
+	if s.opts.Token != "" {
+		mux.HandleFunc("/api/live/health", s.handleLiveHealth)
+		mux.HandleFunc("/api/live/events", s.handleLiveEvents)
+	}
+	if s.opts.UIFS != nil {
+		mux.Handle("/", http.FileServer(s.opts.UIFS))
 	} else {
 		mux.HandleFunc("/", s.handleIndex)
 	}
@@ -127,37 +161,82 @@ func (s *Server) handleFlow(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()
 		flowJSON := flowToJSON(s.flow)
 		s.mu.RUnlock()
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(flowJSON)
+		_ = json.NewEncoder(w).Encode(flowJSON)
 
 	case http.MethodPut:
-		var flowJSON FlowJSON
-		if err := json.NewDecoder(r.Body).Decode(&flowJSON); err != nil {
+		var fj FlowJSON
+		if err := json.NewDecoder(r.Body).Decode(&fj); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		flow := jsonToFlow(&flowJSON)
-
+		flow := jsonToFlow(&fj)
 		s.mu.Lock()
 		s.flow = flow
 		s.mu.Unlock()
-
-		// Write back to file
 		if err := s.writeFile(flow); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		// Notify other clients
-		s.broadcastFlow(flow)
-
+		s.broadcastFlowExcept(flow, nil)
 		w.WriteHeader(http.StatusOK)
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleLiveRuns(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.runStore.Snapshot())
+}
+
+func (s *Server) handleLiveHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":       true,
+		"version":  live.ProtocolVersion,
+		"flow_key": s.opts.FlowKey,
+		"pid":      os.Getpid(),
+	})
+}
+
+func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	auth := r.Header.Get("Authorization")
+	expected := "Bearer " + s.opts.Token
+	if subtle.ConstantTimeCompare([]byte(auth), []byte(expected)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	dec := json.NewDecoder(r.Body)
+	var lastRunID string
+	for {
+		var env live.EventEnvelope
+		if err := dec.Decode(&env); err != nil {
+			break
+		}
+		if env.FlowKey != s.opts.FlowKey {
+			http.Error(w, "flow key mismatch", http.StatusConflict)
+			return
+		}
+		if s.runStore.Apply(env) {
+			s.broadcastRunEvent(env)
+		}
+		lastRunID = env.RunID
+		if env.Kind == live.KindRunFinished {
+			lastRunID = ""
+		}
+	}
+	if lastRunID != "" {
+		s.runStore.MarkDisconnected(lastRunID)
+		s.broadcastRunSnapshot()
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -166,58 +245,57 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("websocket upgrade: %v", err)
 		return
 	}
+	client := newWSClient(conn)
 
 	s.clientMu.Lock()
-	s.clients[conn] = true
+	s.clients[client] = struct{}{}
 	s.clientMu.Unlock()
 
-	// Send current state
+	// Initial state: flow, then run_snapshot.
 	s.mu.RLock()
 	flowJSON := flowToJSON(s.flow)
 	s.mu.RUnlock()
+	if data, err := json.Marshal(WSMessage{Type: "flow", Data: mustJSON(flowJSON)}); err == nil {
+		client.Send(data)
+	}
+	snapshot := s.runStore.Snapshot()
+	if data, err := json.Marshal(WSMessage{Type: "run_snapshot", Data: mustJSON(snapshot)}); err == nil {
+		client.Send(data)
+	}
 
-	data, _ := json.Marshal(flowJSON)
-	msg := WSMessage{Type: "flow", Data: data}
-	conn.WriteJSON(msg)
-
-	// Read messages from client
+	// Read loop runs until conn closes.
 	for {
 		var wsMsg WSMessage
 		if err := conn.ReadJSON(&wsMsg); err != nil {
 			break
 		}
-
 		switch wsMsg.Type {
 		case "update_flow":
-			var flowJSON FlowJSON
-			if err := json.Unmarshal(wsMsg.Data, &flowJSON); err != nil {
+			var fj FlowJSON
+			if err := json.Unmarshal(wsMsg.Data, &fj); err != nil {
 				log.Printf("invalid flow update: %v", err)
 				continue
 			}
-
-			flow := jsonToFlow(&flowJSON)
-
+			flow := jsonToFlow(&fj)
 			s.mu.Lock()
 			s.flow = flow
 			s.mu.Unlock()
-
 			if err := s.writeFile(flow); err != nil {
 				log.Printf("write file: %v", err)
 			}
-
-			s.broadcastFlowExcept(flow, conn)
+			s.broadcastFlowExcept(flow, client)
 		}
 	}
 
 	s.clientMu.Lock()
-	delete(s.clients, conn)
+	delete(s.clients, client)
 	s.clientMu.Unlock()
-	conn.Close()
+	client.Close()
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(`<!DOCTYPE html>
+	_, _ = w.Write([]byte(`<!DOCTYPE html>
 <html>
 <head><title>Flow Editor</title></head>
 <body>
@@ -233,36 +311,62 @@ func (s *Server) writeFile(flow *model.Flow) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.filePath, data, 0o644)
+	return os.WriteFile(s.opts.FilePath, data, 0o644)
 }
 
-func (s *Server) broadcastFlow(flow *model.Flow) {
-	s.broadcastFlowExcept(flow, nil)
-}
-
-func (s *Server) broadcastFlowExcept(flow *model.Flow, exclude *websocket.Conn) {
+func (s *Server) broadcastFlowExcept(flow *model.Flow, exclude *wsClient) {
 	flowJSON := flowToJSON(flow)
-	data, _ := json.Marshal(flowJSON)
-	msg := WSMessage{Type: "flow", Data: data}
-
+	data, err := json.Marshal(WSMessage{Type: "flow", Data: mustJSON(flowJSON)})
+	if err != nil {
+		return
+	}
 	s.clientMu.Lock()
 	defer s.clientMu.Unlock()
-
-	for conn := range s.clients {
-		if conn == exclude {
+	for c := range s.clients {
+		if c == exclude {
 			continue
 		}
-		if err := conn.WriteJSON(msg); err != nil {
-			conn.Close()
-			delete(s.clients, conn)
-		}
+		c.Send(data)
 	}
+}
+
+func (s *Server) broadcastRunEvent(env live.EventEnvelope) {
+	data, err := json.Marshal(WSMessage{Type: "run_event", Data: mustJSON(env)})
+	if err != nil {
+		return
+	}
+	s.clientMu.Lock()
+	defer s.clientMu.Unlock()
+	for c := range s.clients {
+		c.Send(data)
+	}
+}
+
+func (s *Server) broadcastRunSnapshot() {
+	snap := s.runStore.Snapshot()
+	data, err := json.Marshal(WSMessage{Type: "run_snapshot", Data: mustJSON(snap)})
+	if err != nil {
+		return
+	}
+	s.clientMu.Lock()
+	defer s.clientMu.Unlock()
+	for c := range s.clients {
+		c.Send(data)
+	}
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return b
 }
 
 // StartFileWatcher begins watching the flow file for external changes.
 func (s *Server) StartFileWatcher() error {
-	watcher, err := NewFileWatcher(s.filePath, func() {
-		flow, err := parser.ParseFile(s.filePath)
+	watcher, err := NewFileWatcher(s.opts.FilePath, func() {
+		flow, err := parser.ParseFile(s.opts.FilePath)
 		if err != nil {
 			log.Printf("reparse on file change: %v", err)
 			return
@@ -270,7 +374,7 @@ func (s *Server) StartFileWatcher() error {
 		s.mu.Lock()
 		s.flow = flow
 		s.mu.Unlock()
-		s.broadcastFlow(flow)
+		s.broadcastFlowExcept(flow, nil)
 	})
 	if err != nil {
 		return err
@@ -279,14 +383,23 @@ func (s *Server) StartFileWatcher() error {
 	return nil
 }
 
-// Close shuts down the server and file watcher.
+// Close shuts down the server, file watcher, and all WebSocket clients. It is
+// idempotent and bounds graceful shutdown to ~200ms.
 func (s *Server) Close() {
 	if s.watcher != nil {
 		s.watcher.Close()
+		s.watcher = nil
+	}
+	if s.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		_ = s.httpServer.Shutdown(ctx)
+		cancel()
+		s.httpServer = nil
 	}
 	s.clientMu.Lock()
-	for conn := range s.clients {
-		conn.Close()
+	for c := range s.clients {
+		c.Close()
+		delete(s.clients, c)
 	}
 	s.clientMu.Unlock()
 }

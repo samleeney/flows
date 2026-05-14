@@ -42,3 +42,65 @@ export interface WSMessage {
   type: string;
   data: unknown;
 }
+
+// --- Live execution state ---
+
+export type AgentLiveStatus = "idle" | "running" | "done" | "failed";
+
+export interface AgentLiveState {
+  status: AgentLiveStatus;
+  iter: number;
+  duration_ms?: number;
+  output_preview?: string;
+  output_bytes?: number;
+  output_truncated?: boolean;
+  error?: string;
+}
+
+export interface RunRecord {
+  run_id: string;
+  started_at: string;
+  finished_at?: string;
+  ok?: boolean;
+  error?: string;
+  disconnected: boolean;
+  last_seq: number;
+  agents: Record<string, AgentLiveState>;
+}
+
+export interface RunSnapshot {
+  version: number;
+  flow_key: string;
+  generated_at: string;
+  runs: RunRecord[];
+}
+
+export type EventKind =
+  | "run_started"
+  | "agent_started"
+  | "agent_finished"
+  | "run_finished";
+
+export interface EventEnvelope {
+  version: number;
+  kind: EventKind;
+  flow_key: string;
+  run_id: string;
+  seq: number;
+  ts: string;
+  agent?: string;
+  iter?: number;
+  status?: "done" | "failed";
+  duration_ms?: number;
+  output_preview?: string;
+  output_bytes?: number;
+  output_truncated?: boolean;
+  error?: string;
+  ok?: boolean;
+}
+
+export interface LiveUIState {
+  runsById: Record<string, RunRecord>;
+  runOrder: string[];
+  selectedRunId: string | null;
+}

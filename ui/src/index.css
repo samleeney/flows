@@ -1,0 +1,16 @@
+@keyframes flow-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.flow-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(245, 158, 11, 0.25);
+  border-top-color: #f59e0b;
+  border-radius: 50%;
+  animation: flow-spinner-rotate 0.8s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}

@@ -27,7 +27,7 @@ func copyTestFile(t *testing.T) string {
 
 func TestServerGetFlow(t *testing.T) {
 	tmp := copyTestFile(t)
-	srv, err := NewServer(tmp)
+	srv, err := NewServer(NewServerOptions{FilePath: tmp})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestServerGetFlow(t *testing.T) {
 
 func TestServerRoundTripPreservesDefaults(t *testing.T) {
 	tmp := copyTestFile(t)
-	srv, err := NewServer(tmp)
+	srv, err := NewServer(NewServerOptions{FilePath: tmp})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestServerRoundTripPreservesDefaults(t *testing.T) {
 
 func TestServerPutFlow(t *testing.T) {
 	tmp := copyTestFile(t)
-	srv, err := NewServer(tmp)
+	srv, err := NewServer(NewServerOptions{FilePath: tmp})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestServerPutFlow(t *testing.T) {
 
 func TestServerIndex(t *testing.T) {
 	tmp := copyTestFile(t)
-	srv, err := NewServer(tmp)
+	srv, err := NewServer(NewServerOptions{FilePath: tmp})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

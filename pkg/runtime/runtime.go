@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/samleeney/flows/pkg/live"
 	"github.com/samleeney/flows/pkg/model"
 )
+
+// PreviewMaxBytes caps the size of an output preview attached to a live event.
+const PreviewMaxBytes = 4096
 
 // RunOptions configures a flow execution.
 type RunOptions struct {
@@ -16,6 +21,11 @@ type RunOptions struct {
 	Verbose        bool
 	OnAgentStart   func(name string, iteration int)
 	OnAgentDone    func(name string, iteration int, output string, err error)
+
+	// Live event emission. Both fields are optional; if Observer is nil, a
+	// NopObserver is used and FlowKey is ignored.
+	FlowKey  string
+	Observer live.Observer
 }
 
 // RunResult contains the outputs of a completed flow execution.
@@ -28,11 +38,20 @@ func Run(ctx context.Context, flow *model.Flow, registry *ExecutorRegistry, opts
 	if opts.ExternalInputs == nil {
 		opts.ExternalInputs = make(map[string]string)
 	}
+	if opts.Observer == nil {
+		opts.Observer = live.NopObserver{}
+	}
+
+	runID, err := live.NewRunID()
+	if err != nil {
+		return nil, fmt.Errorf("generate run id: %w", err)
+	}
 
 	state := &flowState{
 		flow:     flow,
 		registry: registry,
 		opts:     opts,
+		runID:    runID,
 		outputs:  make(map[string]string),
 		runs:     make(map[string]int),
 		consumed: make(map[string]map[string]int),
@@ -50,14 +69,31 @@ type flowState struct {
 	flow     *model.Flow
 	registry *ExecutorRegistry
 	opts     RunOptions
+	runID    string
+
 	mu       sync.Mutex
 	outputs  map[string]string         // agent name → latest output
 	runs     map[string]int            // agent name → invocation count
 	consumed map[string]map[string]int // consumer → {producer → producer.runs at last consumption}
 	agents   map[string]*model.Agent
+
+	// Live event emission state. emitMu serializes seq allocation AND
+	// observer publish so ordering at the queue is strict.
+	emitMu sync.Mutex
+	seq    uint64
 }
 
-func (s *flowState) run(ctx context.Context) (*RunResult, error) {
+func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
+	s.emitRunStarted()
+	defer func() {
+		ok := err == nil
+		var errStr string
+		if err != nil {
+			errStr = err.Error()
+		}
+		s.emitRunFinished(ok, errStr)
+	}()
+
 	for {
 		ready := s.findReady()
 		if len(ready) == 0 {
@@ -81,13 +117,13 @@ func (s *flowState) run(ctx context.Context) (*RunResult, error) {
 		wg.Wait()
 		close(errCh)
 
-		// Collect errors
-		for err := range errCh {
+		for e := range errCh {
+			err = e
 			return nil, err
 		}
 	}
 
-	result := &RunResult{Outputs: make(map[string]string)}
+	result = &RunResult{Outputs: make(map[string]string)}
 	s.mu.Lock()
 	for k, v := range s.outputs {
 		result.Outputs[k] = v
@@ -114,7 +150,6 @@ func (s *flowState) findReady() []*model.Agent {
 }
 
 func (s *flowState) canFire(agent *model.Agent) bool {
-	// Check if any start condition is met
 	condMet := false
 	for _, cond := range agent.Start {
 		if s.conditionMet(agent.Name, &cond) {
@@ -126,7 +161,6 @@ func (s *flowState) canFire(agent *model.Agent) bool {
 		return false
 	}
 
-	// Check all inputs are available
 	for _, input := range agent.Inputs {
 		if !s.inputAvailable(&input) {
 			return false
@@ -139,7 +173,6 @@ func (s *flowState) canFire(agent *model.Agent) bool {
 func (s *flowState) conditionMet(agentName string, cond *model.Condition) bool {
 	runs := s.runs[agentName]
 
-	// Check global max_runs for this condition
 	if cond.MaxRuns > 0 && runs >= cond.MaxRuns {
 		return false
 	}
@@ -152,25 +185,20 @@ func (s *flowState) conditionMet(agentName string, cond *model.Condition) bool {
 	}
 
 	if len(cond.When) > 0 {
-		// All referenced agents must have produced output AND that output
-		// must be NEW since the last time this agent consumed it.
 		for _, dep := range cond.When {
 			output, hasOutput := s.outputs[dep]
 			if !hasOutput {
 				return false
 			}
-			// Check contains constraint
 			if cond.Contains != "" && !strings.Contains(output, cond.Contains) {
 				return false
 			}
-			// Check that dep has produced new output since our last consumption
 			depRuns := s.runs[dep]
 			consumed := s.consumed[agentName][dep]
 			if depRuns <= consumed {
 				return false
 			}
 		}
-
 		return true
 	}
 
@@ -180,7 +208,6 @@ func (s *flowState) conditionMet(agentName string, cond *model.Condition) bool {
 func (s *flowState) inputAvailable(input *model.Input) bool {
 	if input.From == "external" {
 		_, ok := s.opts.ExternalInputs[input.From]
-		// External inputs are always "available" — they're provided at start
 		return true || ok
 	}
 
@@ -189,7 +216,6 @@ func (s *flowState) inputAvailable(input *model.Input) bool {
 		return true
 	}
 
-	// Check fallback
 	if input.Fallback == "external" {
 		return true
 	}
@@ -217,7 +243,6 @@ func (s *flowState) resolveInputs(agent *model.Agent) map[string]string {
 			continue
 		}
 
-		// Use fallback
 		if input.Fallback == "external" {
 			resolved[name] = s.opts.ExternalInputs[name]
 		} else if input.Fallback != "" {
@@ -231,9 +256,6 @@ func (s *flowState) executeAgent(ctx context.Context, agent *model.Agent) error 
 	s.mu.Lock()
 	iteration := s.runs[agent.Name] + 1
 	s.runs[agent.Name] = iteration
-	// Record consumption of all upstream dependencies (from when clauses and
-	// input sources). This is how we know whether the dependency has produced
-	// NEW output on the next scheduling round.
 	if s.consumed[agent.Name] == nil {
 		s.consumed[agent.Name] = make(map[string]int)
 	}
@@ -252,6 +274,7 @@ func (s *flowState) executeAgent(ctx context.Context, agent *model.Agent) error 
 	if s.opts.OnAgentStart != nil {
 		s.opts.OnAgentStart(agent.Name, iteration)
 	}
+	s.emitAgentStarted(agent.Name, iteration)
 
 	inputs := s.resolveInputs(agent)
 
@@ -262,20 +285,84 @@ func (s *flowState) executeAgent(ctx context.Context, agent *model.Agent) error 
 
 	executor, err := s.registry.Get(lang)
 	if err != nil {
+		s.emitAgentFinished(agent.Name, iteration, live.StatusFailed, 0, "", err)
 		return err
 	}
 
+	startTime := time.Now()
 	output, err := executor.Execute(ctx, agent.Content, inputs)
+	durationMS := time.Since(startTime).Milliseconds()
+
 	if s.opts.OnAgentDone != nil {
 		s.opts.OnAgentDone(agent.Name, iteration, output, err)
 	}
+
 	if err != nil {
+		s.emitAgentFinished(agent.Name, iteration, live.StatusFailed, durationMS, "", err)
 		return err
 	}
+
+	s.emitAgentFinished(agent.Name, iteration, live.StatusDone, durationMS, output, nil)
 
 	s.mu.Lock()
 	s.outputs[agent.Name] = output
 	s.mu.Unlock()
 
 	return nil
+}
+
+// emit constructs and publishes a single envelope. Holds emitMu for both seq
+// allocation and the (non-blocking) Publish, so ordering at the observer
+// queue is strict per run.
+func (s *flowState) emit(env live.EventEnvelope) {
+	s.emitMu.Lock()
+	defer s.emitMu.Unlock()
+	s.seq++
+	env.Version = live.ProtocolVersion
+	env.FlowKey = s.opts.FlowKey
+	env.RunID = s.runID
+	env.Seq = s.seq
+	env.TS = time.Now().UTC()
+	_ = s.opts.Observer.Publish(env)
+}
+
+func (s *flowState) emitRunStarted() {
+	s.emit(live.EventEnvelope{Kind: live.KindRunStarted})
+}
+
+func (s *flowState) emitAgentStarted(name string, iter int) {
+	s.emit(live.EventEnvelope{
+		Kind:  live.KindAgentStarted,
+		Agent: name,
+		Iter:  iter,
+	})
+}
+
+func (s *flowState) emitAgentFinished(name string, iter int, status live.AgentStatus, durationMS int64, output string, execErr error) {
+	env := live.EventEnvelope{
+		Kind:       live.KindAgentFinished,
+		Agent:      name,
+		Iter:       iter,
+		Status:     status,
+		DurationMS: durationMS,
+	}
+	if status == live.StatusDone && output != "" {
+		preview, total, truncated := live.TruncatePreviewUTF8(output, PreviewMaxBytes)
+		env.OutputPreview = preview
+		env.OutputBytes = total
+		env.OutputTruncated = truncated
+	}
+	if execErr != nil {
+		env.Error = execErr.Error()
+	}
+	s.emit(env)
+}
+
+func (s *flowState) emitRunFinished(ok bool, errStr string) {
+	v := ok
+	s.emit(live.EventEnvelope{
+		Kind:  live.KindRunFinished,
+		OK:    &v,
+		Error: errStr,
+	})
 }
