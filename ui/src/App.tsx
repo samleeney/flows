@@ -24,7 +24,13 @@ import {
   decorateNodes,
 } from "./flowToReactFlow";
 import { AgentNode, FunctionNode } from "./AgentNode";
-import { InputNode, OutputNode } from "./SidecarNode";
+import {
+  InputNode,
+  LoopFrameNode,
+  OutputNode,
+  TerminalNode,
+} from "./SidecarNode";
+import { ExitRouteEdge } from "./RouteEdges";
 import {
   applyEvent,
   applySnapshot,
@@ -36,6 +42,12 @@ const nodeTypes = {
   functionNode: FunctionNode,
   inputNode: InputNode,
   outputNode: OutputNode,
+  terminalNode: TerminalNode,
+  loopFrameNode: LoopFrameNode,
+};
+
+const edgeTypes = {
+  exitRoute: ExitRouteEdge,
 };
 
 const FIT_VIEW_OPTIONS = {
@@ -60,7 +72,7 @@ export default function App() {
     const newNodes = flowToNodes(newFlow);
     const newEdges = flowToEdges(newFlow);
 
-    void autoLayout(newNodes, newEdges)
+    void autoLayout(newFlow, newNodes, newEdges)
       .then((layoutedNodes) => {
         if (layoutSeq.current !== seq) return;
         const layoutedFlow = nodesToFlow(newFlow, layoutedNodes);
@@ -181,6 +193,7 @@ export default function App() {
         nodes={decoratedNodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodeClick={(_, node) => setSelectedNode(node)}
         onPaneClick={() => setSelectedNode(null)}
         onInit={(instance) => {
@@ -242,7 +255,7 @@ function DetailsPanel({
         }}
       >
         <strong style={{ fontSize: 13 }}>
-          {agent?.name ?? String(data.name ?? node.id)}
+          {agent?.name ?? String(data.name ?? data.label ?? node.id)}
         </strong>
         <button
           type="button"
@@ -264,6 +277,7 @@ function DetailsPanel({
         {agent ? <AgentDetails agent={agent} data={data} /> : null}
         {kind === "input" ? <InputDetails data={data} /> : null}
         {kind === "output" ? <OutputDetails data={data} /> : null}
+        {kind === "terminal" ? <TerminalDetails data={data} /> : null}
       </div>
     </div>
   );
@@ -327,22 +341,29 @@ function AgentDetails({
       <DetailRow
         label="starts"
         value={agent.start
-          .map((start) =>
-            start.always
-              ? `always, max ${start.always.max_runs}`
-              : [
-                  `when ${(start.when ?? []).join(", ")}`,
-                  start.contains ? `contains ${start.contains}` : "",
-                  start.max_runs ? `max ${start.max_runs}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(", ")
-          )
+          .map((start) => formatStartCondition(start))
           .join("\n")}
       />
       <DetailRow label="content" value={agent.content.slice(0, 1200)} />
     </>
   );
+}
+
+function formatStartCondition(start: FlowJSON["agents"][number]["start"][number]) {
+  if (start.always) {
+    return start.always.max_runs > 1
+      ? `start immediately, up to ${start.always.max_runs} runs`
+      : "start immediately";
+  }
+
+  const parts = [`after ${(start.when ?? []).join(", ")}`];
+  if (start.contains) {
+    parts.push(`if output has "${start.contains}"`);
+  }
+  if (start.max_runs) {
+    parts.push(`up to ${start.max_runs} repeats`);
+  }
+  return parts.join(", ");
 }
 
 function InputDetails({ data }: { data: Record<string, unknown> }) {
@@ -364,6 +385,15 @@ function OutputDetails({ data }: { data: Record<string, unknown> }) {
       <DetailRow label="goes to" value={data.target} />
       <DetailRow label="target input" value={data.inputName} />
       <DetailRow label="condition" value={data.condition} />
+    </>
+  );
+}
+
+function TerminalDetails({ data }: { data: Record<string, unknown> }) {
+  return (
+    <>
+      <DetailRow label="kind" value={data.label} />
+      <DetailRow label="description" value={data.description} />
     </>
   );
 }

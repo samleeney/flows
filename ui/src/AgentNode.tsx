@@ -23,7 +23,7 @@ interface AgentRole {
 }
 
 interface RoleBadgeProps {
-  label: "START" | "FINISH" | "STOP";
+  label: "START" | "END";
   title: string;
 }
 
@@ -79,11 +79,9 @@ function roleColors(label: RoleBadgeProps["label"]) {
   switch (label) {
     case "START":
       return { bg: "#dcfce7", border: "#86efac", color: "#166534" };
-    case "FINISH":
-      return { bg: "#ffe4e6", border: "#fda4af", color: "#9f1239" };
-    case "STOP":
+    case "END":
     default:
-      return { bg: "#fef3c7", border: "#fbbf24", color: "#92400e" };
+      return { bg: "#ffe4e6", border: "#fda4af", color: "#9f1239" };
   }
 }
 
@@ -258,16 +256,14 @@ export function AgentNode({ data }: AgentNodeProps) {
           {role?.isStart && (
             <RoleBadge label="START" title="Runs from an always condition" />
           )}
-          {role?.isFinish && (
+          {(role?.isFinish || role?.isStopGate) && (
             <RoleBadge
-              label="FINISH"
-              title="No downstream agent starts from this output"
-            />
-          )}
-          {role?.isStopGate && (
-            <RoleBadge
-              label="STOP"
-              title="The run can stop here when no downstream condition matches"
+              label="END"
+              title={
+                role?.isStopGate
+                  ? "The run ends here when no downstream condition matches"
+                  : "No downstream agent starts from this output"
+              }
             />
           )}
         </div>
