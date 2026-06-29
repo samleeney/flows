@@ -7,6 +7,7 @@ interface AgentNodeProps {
     label: string;
     liveState?: AgentLiveState;
     role?: AgentRole;
+    defaultModel?: string;
   };
 }
 
@@ -109,6 +110,35 @@ function RoleBadge({ label, title }: RoleBadgeProps) {
   );
 }
 
+function ModelBadge({ model, inherited }: { model: string; inherited: boolean }) {
+  return (
+    <span
+      title={inherited ? `Inherited default model: ${model}` : `Model: ${model}`}
+      style={{
+        minWidth: 0,
+        maxWidth: 150,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        display: "inline-block",
+        border: "1px solid #bfdbfe",
+        borderRadius: 4,
+        background: "#dbeafe",
+        color: "#1e3a8a",
+        fontFamily:
+          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontSize: 10,
+        fontWeight: 700,
+        lineHeight: "14px",
+        padding: "1px 5px",
+        letterSpacing: 0,
+      }}
+    >
+      {model}
+    </span>
+  );
+}
+
 function TypeGlyph({
   isFunction,
   language,
@@ -164,7 +194,7 @@ function TypeGlyph({
 }
 
 export function AgentNode({ data }: AgentNodeProps) {
-  const { agent, label, liveState, role } = data;
+  const { agent, label, liveState, role, defaultModel } = data;
   const isFunction = agent.node_type === "function";
   const status: AgentLiveStatus = liveState?.status ?? "idle";
   const iter = liveState?.iter ?? 0;
@@ -172,6 +202,9 @@ export function AgentNode({ data }: AgentNodeProps) {
   const labelDisplay = formatLabel(label, status, iter);
   const hasRoleBadge =
     role?.isStart || role?.isFinish || role?.isStopGate || agent.goal;
+  const directModel = agent.model?.trim();
+  const inheritedModel = directModel ? undefined : defaultModel?.trim();
+  const displayModel = directModel || inheritedModel;
 
   return (
     <div
@@ -250,8 +283,24 @@ export function AgentNode({ data }: AgentNodeProps) {
           <span className="flow-spinner" style={{ marginLeft: "auto" }} />
         )}
       </div>
-      <div style={{ fontSize: 11, color: "#64748b" }}>
-        {isFunction ? `${agent.language ?? "code"} code block` : "agent prompt"}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          minWidth: 0,
+          fontSize: 11,
+          color: "#64748b",
+        }}
+      >
+        <span>
+          {isFunction
+            ? `${agent.language ?? "code"} code block`
+            : "agent prompt"}
+        </span>
+        {!isFunction && displayModel && (
+          <ModelBadge model={displayModel} inherited={Boolean(inheritedModel)} />
+        )}
       </div>
       {hasRoleBadge && (
         <div

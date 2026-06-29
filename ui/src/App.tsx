@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useEffect,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -550,6 +551,309 @@ function AuthoredPromptSection({ content }: { content: string }) {
   );
 }
 
+function CodeBlockSection({
+  label,
+  content,
+  language,
+}: {
+  label: string;
+  content: string;
+  language?: string;
+}) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700 }}>
+        {label}
+      </div>
+      <CodeViewer content={content} language={language} />
+    </div>
+  );
+}
+
+function CodeViewer({
+  content,
+  language,
+}: {
+  content: string;
+  language?: string;
+}) {
+  const lines = codeLines(content);
+  const lineDigits = String(lines.length).length;
+  return (
+    <div
+      style={{
+        background: "#0f172a",
+        border: "1px solid #1e293b",
+        borderRadius: 7,
+        color: "#dbeafe",
+        fontFamily:
+          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontSize: 11,
+        lineHeight: 1.55,
+        marginTop: 4,
+        maxHeight: 320,
+        overflow: "auto",
+        padding: "8px 0",
+      }}
+    >
+      {language ? (
+        <div
+          style={{
+            borderBottom: "1px solid rgba(148, 163, 184, 0.24)",
+            color: "#94a3b8",
+            fontSize: 10,
+            fontWeight: 800,
+            lineHeight: "14px",
+            marginBottom: 6,
+            padding: "0 12px 6px",
+            textTransform: "uppercase",
+          }}
+        >
+          {language}
+        </div>
+      ) : null}
+      <div style={{ minWidth: "max-content" }}>
+        {lines.map((line, index) => (
+          <div
+            key={`${index}-${line}`}
+            style={{
+              display: "grid",
+              gridTemplateColumns: `${lineDigits + 2}ch minmax(0, 1fr)`,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                color: "#64748b",
+                padding: "0 10px 0 12px",
+                textAlign: "right",
+                userSelect: "none",
+              }}
+            >
+              {index + 1}
+            </span>
+            <span style={{ paddingRight: 12, whiteSpace: "pre" }}>
+              {tokenizeCodeLine(line, language).map((token, tokenIndex) => (
+                <span
+                  key={`${tokenIndex}-${token.text}`}
+                  style={codeTokenStyle(token.kind)}
+                >
+                  {token.text}
+                </span>
+              ))}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type CodeTokenKind =
+  | "keyword"
+  | "builtin"
+  | "string"
+  | "comment"
+  | "number"
+  | "decorator"
+  | "operator"
+  | "plain";
+
+type CodeToken = {
+  text: string;
+  kind: CodeTokenKind;
+};
+
+const PYTHON_KEYWORDS = new Set([
+  "and",
+  "as",
+  "assert",
+  "break",
+  "class",
+  "continue",
+  "def",
+  "del",
+  "elif",
+  "else",
+  "except",
+  "False",
+  "finally",
+  "for",
+  "from",
+  "global",
+  "if",
+  "import",
+  "in",
+  "is",
+  "lambda",
+  "None",
+  "nonlocal",
+  "not",
+  "or",
+  "pass",
+  "raise",
+  "return",
+  "True",
+  "try",
+  "while",
+  "with",
+  "yield",
+]);
+
+const PYTHON_BUILTINS = new Set([
+  "abs",
+  "bool",
+  "dict",
+  "enumerate",
+  "float",
+  "int",
+  "len",
+  "list",
+  "map",
+  "max",
+  "min",
+  "print",
+  "range",
+  "set",
+  "str",
+  "sum",
+  "tuple",
+  "zip",
+]);
+
+function codeLines(content: string) {
+  const trimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
+  return trimmed.length ? trimmed.split("\n") : [""];
+}
+
+function normalizeLanguage(language?: string) {
+  const value = (language ?? "").toLowerCase();
+  if (value === "py" || value === "python") return "python";
+  return value;
+}
+
+function inferCodeLanguage(content: string, fallback?: string) {
+  const normalized = normalizeLanguage(fallback);
+  if (normalized) return normalized;
+  if (
+    /^\s*(from|import|def|class)\s/m.test(content) ||
+    /jnp\.|jax\.|\.block_until_ready\(\)/.test(content)
+  ) {
+    return "python";
+  }
+  return "";
+}
+
+function tokenizeCodeLine(line: string, language?: string): CodeToken[] {
+  if (normalizeLanguage(language) !== "python") {
+    return [{ text: line, kind: "plain" }];
+  }
+  return tokenizePythonLine(line);
+}
+
+function tokenizePythonLine(line: string): CodeToken[] {
+  const tokens: CodeToken[] = [];
+  let index = 0;
+  while (index < line.length) {
+    const rest = line.slice(index);
+    const char = line[index];
+
+    if (char === "#") {
+      tokens.push({ text: rest, kind: "comment" });
+      break;
+    }
+
+    if (char === "'" || char === '"') {
+      const quote = char;
+      const triple = rest.startsWith(quote.repeat(3));
+      const end = findStringEnd(line, index, quote, triple);
+      tokens.push({ text: line.slice(index, end), kind: "string" });
+      index = end;
+      continue;
+    }
+
+    const number = rest.match(/^\b\d+(\.\d+)?\b/);
+    if (number) {
+      tokens.push({ text: number[0], kind: "number" });
+      index += number[0].length;
+      continue;
+    }
+
+    const decorator = rest.match(/^@[A-Za-z_][\w.]*/);
+    if (decorator) {
+      tokens.push({ text: decorator[0], kind: "decorator" });
+      index += decorator[0].length;
+      continue;
+    }
+
+    const word = rest.match(/^[A-Za-z_]\w*/);
+    if (word) {
+      const text = word[0];
+      const kind = PYTHON_KEYWORDS.has(text)
+        ? "keyword"
+        : PYTHON_BUILTINS.has(text)
+        ? "builtin"
+        : "plain";
+      tokens.push({ text, kind });
+      index += text.length;
+      continue;
+    }
+
+    if (/^[+\-*\/%=<>!&|^~:.,()[\]{}]+/.test(rest)) {
+      const op = rest.match(/^[+\-*\/%=<>!&|^~:.,()[\]{}]+/)?.[0] ?? char;
+      tokens.push({ text: op, kind: "operator" });
+      index += op.length;
+      continue;
+    }
+
+    tokens.push({ text: char, kind: "plain" });
+    index += 1;
+  }
+  return tokens;
+}
+
+function findStringEnd(
+  line: string,
+  start: number,
+  quote: string,
+  triple: boolean
+) {
+  const delimiter = triple ? quote.repeat(3) : quote;
+  let index = start + delimiter.length;
+  while (index < line.length) {
+    if (!triple && line[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (line.startsWith(delimiter, index)) {
+      return index + delimiter.length;
+    }
+    index += 1;
+  }
+  return line.length;
+}
+
+function codeTokenStyle(kind: CodeTokenKind): CSSProperties {
+  switch (kind) {
+    case "keyword":
+      return { color: "#93c5fd", fontWeight: 700 };
+    case "builtin":
+      return { color: "#c4b5fd" };
+    case "string":
+      return { color: "#86efac" };
+    case "comment":
+      return { color: "#94a3b8", fontStyle: "italic" };
+    case "number":
+      return { color: "#fcd34d" };
+    case "decorator":
+      return { color: "#f0abfc" };
+    case "operator":
+      return { color: "#cbd5e1" };
+    default:
+      return {};
+  }
+}
+
 function InputsSection({
   inputs,
   target,
@@ -787,9 +1091,10 @@ function AgentDetails({
           .map((start) => formatStartCondition(start))
           .join("\n")}
       />
-      <DetailRow
+      <CodeBlockSection
         label="code"
-        value={agent.content}
+        content={agent.content}
+        language={agent.language ?? "code"}
       />
     </>
   );
@@ -1148,10 +1453,11 @@ function externalInputPreviewHTML(input: InputSummary) {
   const note = origin.preview_truncated
     ? `<div class="preview-note">Preview truncated.</div>`
     : "";
+  const language = inferCodeLanguage(origin.preview, languageFromFileName(origin.file_name));
   return `<section class="preview">
       <div class="preview-heading">External input preview</div>
       <div class="preview-meta">${escapeHTML(title)}${escapeHTML(formatByteSuffix(origin.bytes))}</div>
-      <pre class="preview-pre">${escapeHTML(origin.preview)}</pre>
+      ${codeBlockHTML(origin.preview, language)}
       ${note}
     </section>`;
 }
@@ -1170,17 +1476,136 @@ function detailsTextToHTML(detailText: string): string {
   ${goalTextToHTML(body)}
 </section>`;
       }
-      const isCode = label === "authored prompt" || label === "code";
+      if (label === "code") {
+        return `<section class="detail-section">
+  <div class="detail-label">${escapeHTML(label)}</div>
+  ${codeBlockHTML(body, inferCodeLanguage(body))}
+</section>`;
+      }
+      if (label === "authored prompt") {
+        return `<section class="detail-section">
+  <div class="detail-label">${escapeHTML(label)}</div>
+  <pre class="prompt-block">${escapeHTML(body)}</pre>
+</section>`;
+      }
       return `<section class="detail-section">
   <div class="detail-label">${escapeHTML(label)}</div>
-  ${
-    isCode
-      ? `<pre class="code-block">${escapeHTML(body)}</pre>`
-      : `<div class="detail-value">${escapeHTML(body)}</div>`
-  }
+  <div class="detail-value">${escapeHTML(body)}</div>
 </section>`;
     })
     .join("\n");
+}
+
+function languageFromFileName(fileName?: string) {
+  const lower = (fileName ?? "").toLowerCase();
+  if (lower.endsWith(".py")) return "python";
+  return "";
+}
+
+function codeBlockHTML(content: string, language?: string) {
+  const lines = codeLines(content);
+  const digits = String(lines.length).length;
+  const lang = inferCodeLanguage(content, language);
+  return `<div class="code-shell">
+    ${
+      lang
+        ? `<div class="code-header">${escapeHTML(lang)}</div>`
+        : ""
+    }
+    <div class="code-grid">
+      ${lines
+        .map(
+          (line, index) => `<div class="code-row" style="grid-template-columns: ${
+            digits + 2
+          }ch minmax(0, 1fr)">
+        <span class="code-line-number">${index + 1}</span>
+        <span class="code-line-text">${highlightCodeLineHTML(line, lang)}</span>
+      </div>`
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
+function highlightCodeLineHTML(line: string, language?: string) {
+  return tokenizeCodeLine(line, language)
+    .map(
+      (token) =>
+        `<span class="${codeTokenClass(token.kind)}">${escapeHTML(token.text)}</span>`
+    )
+    .join("");
+}
+
+function codeTokenClass(kind: CodeTokenKind) {
+  return `tok-${kind}`;
+}
+
+function codeBlockCSS() {
+  return `
+    .code-shell {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      color: #dbeafe;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      margin: 0;
+      max-height: 420px;
+      overflow: auto;
+      padding: 8px 0;
+    }
+    .code-header {
+      border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+      color: #94a3b8;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 14px;
+      margin-bottom: 6px;
+      padding: 0 12px 6px;
+      text-transform: uppercase;
+    }
+    .code-grid {
+      min-width: max-content;
+    }
+    .code-row {
+      display: grid;
+    }
+    .code-line-number {
+      color: #64748b;
+      padding: 0 10px 0 12px;
+      text-align: right;
+      user-select: none;
+    }
+    .code-line-text {
+      padding-right: 12px;
+      white-space: pre;
+    }
+    .tok-keyword {
+      color: #93c5fd;
+      font-weight: 700;
+    }
+    .tok-builtin {
+      color: #c4b5fd;
+    }
+    .tok-string {
+      color: #86efac;
+    }
+    .tok-comment {
+      color: #94a3b8;
+      font-style: italic;
+    }
+    .tok-number {
+      color: #fcd34d;
+    }
+    .tok-decorator {
+      color: #f0abfc;
+    }
+    .tok-operator {
+      color: #cbd5e1;
+    }
+    .tok-plain {
+      color: inherit;
+    }
+  `;
 }
 
 function goalTextToHTML(goalText: string): string {
@@ -1404,6 +1829,7 @@ function openInputVisualizer(target: string, input: InputSummary) {
       font-size: 12px;
       margin-top: 6px;
     }
+    ${codeBlockCSS()}
     @media (max-width: 760px) {
       .route,
       .fallback-route .route {
@@ -1585,7 +2011,7 @@ function openDetailsWindow(title: string, detailText: string) {
       margin-top: 1px;
       width: 20px;
     }
-    .code-block {
+    .prompt-block {
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       border: 1px solid #e2e8f0;
@@ -1595,6 +2021,7 @@ function openDetailsWindow(title: string, detailText: string) {
       margin: 0;
       font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
+    ${codeBlockCSS()}
   </style>
 </head>
 <body>

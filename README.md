@@ -1,93 +1,67 @@
 # Flows
 
-Flows is a markdown-based agent flow writing system. A flow reads like a small
-notebook or Emacs org-mode document: front matter defines global settings, each
-heading defines an agent or programmatic step, and fenced blocks define that
-step's inputs, triggers, and executable code.
+Markdown-native agent workflows: write prompts, code blocks, inputs, outputs,
+goals, and loops in one `.md` file, then run or visualize the flow.
 
-The useful idea is mixing fuzzy agent work with deterministic program steps.
-Prompt agents can rewrite, review, or summarize; code blocks can benchmark,
-parse, validate, or transform; loops connect them until a condition is met. Each
-step has explicit inputs and outputs, so the same document can be executed,
-tested, and visualized in the browser.
+![Flows browser UI showing a goal-backed JAX optimization loop](docs/assets/flow-ui-demo.png)
 
-## JAX Optimization Example
+## What It Does
 
-The example flow is `examples/jax_optimization_loop.md`. It starts from
-deliberately slow JAX code in `examples/inputs/slow_jax.py` and a runtime target:
+- Prompt blocks handle fuzzy work such as rewriting, review, planning, and summarizing.
+- Code blocks handle deterministic work such as parsing, tests, validation, and benchmarks.
+- Inputs and outputs are explicit, so later blocks only receive what the flow declares.
+- Loops are ordinary start rules, driven by code output such as `fast_enough` or `too_slow`.
+- Goal cards attach human-readable objectives and validation criteria to a single agent block.
+
+## Quick Start
 
 ```bash
-./flow run examples/jax_optimization_loop.md -f --input code="$(cat examples/inputs/slow_jax.py)" --input target_ms=5
+make build-go
+./flow validate examples/jax_short_goal_loop.md
+./flow chart examples/jax_short_goal_loop.md
 ```
 
-The flow is split into four blocks:
+Run the short JAX optimization demo:
 
-1. `speed_optimizer` is an agent prompt. It receives the original code, or later
-   benchmark feedback, and rewrites the JAX for runtime.
-2. `memory_optimizer` is another agent prompt. It receives the speed-optimized
-   code and reduces unnecessary allocation.
-3. `waste_reducer` is an agent prompt. It removes debug output, dead code, and
-   verbosity while preserving the prior optimizations.
-4. `benchmark` is a Python code block. It imports real `jax`, executes the
-   candidate code, measures runtime, and emits either `fast_enough` or
-   `too_slow`.
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install "jax[cpu]"
 
-The loop is declared in markdown, not hidden in code. If `benchmark` outputs
-`too_slow`, the result feeds back into `speed_optimizer`:
+FLOW_PYTHON_COMMAND=.venv/bin/python ./flow run examples/jax_short_goal_loop.md -f \
+  --input code=@examples/inputs/slow_jax.py \
+  --input target_ms=5
+```
+
+## Flow Shape
+
+Each `##` heading is one block. The first fenced `yaml` block configures inputs,
+start conditions, executor, model, and routing. Prompt text or an executable
+code fence supplies the block body.
+
+````markdown
+## speed_optimizer
 
 ```yaml
+inputs:
+  code:
+    from: external
 start:
   - always: {max_runs: 1}
   - when: benchmark
     contains: too_slow
     max_runs: 3
+prompt_executor: codex_cli
+model: gpt-5.3-codex-spark
 ```
 
-When a loop exhausts its `max_runs` cap, `on_exhaustion` can either use a
-reserved policy (`stop` or `continue`) or route to another agent by name:
-
-```yaml
-start:
-  - when: benchmark
-    contains: too_slow
-    max_runs: 3
-    on_exhaustion: escalate
-```
-
-The `escalate` block can omit ordinary `start` conditions if it is only reached
-through this route.
-
-Agents can also have an attached goal block immediately after their YAML config:
-
-````markdown
-```goal
-objective: Write exactly three concise action bullets.
-validation:
-  - Return exactly three bullet lines.
-  - Each line starts with "- ".
-max_turns: 1
-```
+Rewrite the input code to reduce runtime. Return only the improved code.
 ````
 
-The browser renders it as a stacked metadata card above the owning agent with a
-small `<->` association line, not as a separate executable node.
-
-That makes the document both readable and executable: fuzzy optimization steps
-are linked to a programmatic benchmark, and the benchmark controls whether the
-agent loop continues.
-
-For prompt nodes that should change files in the current repository, use
-`prompt_executor: codex_cli_write`. Plain `codex_cli` remains read-only and is
-best for text outputs such as reviews, summaries, and generated code snippets.
-
-## Visualizing
-
-Every flow can be opened in the browser:
+## CLI
 
 ```bash
-./flow chart examples/jax_optimization_loop.md
+./flow validate <flow.md>
+./flow run <flow.md> -f --input name=value --input file=@path/to/file
+./flow chart <flow.md>
+./flow viz <flow.md>
 ```
-
-The UI shows agent blocks, code blocks, local input/output blocks, generated
-output links, and loop conditions. Clicking a block shows the inputs, triggers,
-content, and routing details.

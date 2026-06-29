@@ -153,6 +153,7 @@ export function flowToNodes(
       liveState: agentLive?.[agent.name],
       role: roles.get(agent.name),
       inputs: summarizeInputs(agent, labels),
+      defaultModel: flow.defaults.model,
     },
   }));
 
