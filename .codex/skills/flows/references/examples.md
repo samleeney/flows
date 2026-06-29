@@ -328,9 +328,310 @@ Important loop details:
 - The code gate decides whether the loop should continue.
 - The UI should show the loop condition clearly because it is the main control edge.
 
+## Explicit State Handoff
+
+Use this pattern when a later agent needs more than a final answer. Flows do
+not transfer chat history, hidden reasoning, or tool transcripts between
+blocks. Only declared inputs are passed, and each upstream block contributes
+its latest raw output text.
+
+Ask the upstream agent to emit a deliberate handoff artifact:
+
+~~~markdown
+## investigate
+
+```yaml
+inputs:
+  bug_report:
+    from: external
+start:
+  - always: {max_runs: 1}
+```
+
+Investigate the bug report. Return:
+
+RESULT:
+- Most likely cause
+- Evidence
+
+HANDOFF:
+- What you tried
+- Important assumptions
+- Failed approaches
+- Suggested next action
+~~~
+
+Then pass that output explicitly:
+
+~~~markdown
+## fix_plan
+
+```yaml
+inputs:
+  investigation:
+    from: investigate
+start:
+  - when: investigate
+```
+
+Use the `investigation` input. Preserve the HANDOFF assumptions unless you find
+contradicting evidence. Produce a minimal patch plan.
+~~~
+
+Prefer this over asking agents to rely on implicit prior context.
+
+## Loop Exhaustion Route
+
+Use this when a loop reaches `max_runs` and should call another agent instead
+of stopping the whole flow or silently continuing. `stop` and `continue` are
+reserved policies; any other valid agent name is a route target.
+
+~~~markdown
+---
+name: optimization_with_escalation
+description: Optimize until benchmark passes, then escalate if the loop exhausts.
+external_inputs:
+  - code
+  - target_ms
+defaults:
+  prompt_executor: codex_cli
+  model: gpt-5.3-codex-spark
+---
+
+## improve
+
+```yaml
+inputs:
+  code:
+    from: benchmark
+    fallback: external
+  target_ms:
+    from: external
+start:
+  - always: {max_runs: 1}
+  - when: benchmark
+    contains: too_slow
+    max_runs: 3
+    on_exhaustion: escalate
+```
+
+Improve the code. If benchmark feedback is present in `code`, use the latest
+fenced code block and the feedback as the starting point.
+
+Return only one fenced Python code block.
+
+## benchmark
+
+```yaml
+inputs:
+  candidate:
+    from: improve
+  target_ms:
+    from: external
+start:
+  - when: improve
+```
+
+```python
+import json
+
+# Replace this with a real benchmark in production flows.
+passed = "fast_path" in inputs["candidate"]
+status = "fast_enough" if passed else "too_slow"
+output = status + "\n" + json.dumps({
+    "passed": passed,
+    "target_ms": inputs["target_ms"],
+    "candidate": inputs["candidate"],
+})
+```
+
+## escalate
+
+```yaml
+inputs:
+  latest_feedback:
+    from: benchmark
+  original_code:
+    from: external
+```
+
+The optimizer exhausted its retry budget.
+
+Summarize:
+- Why the loop did not finish
+- The latest benchmark feedback
+- The safest next manual or agentic step
+~~~
+
+Route-only handlers such as `escalate` may omit ordinary `start` conditions if
+they are only reached through `on_exhaustion`. The runtime fires the handler
+once, after confirming its inputs are available. Mermaid charts show the
+control edge as `on exhaustion`.
+
+Use `on_exhaustion: continue` only when exhausting the loop should not be
+considered an error and no handler is needed.
+
+## Goal-Style Agent Blocks
+
+Use a fenced `goal` block immediately after an agent's YAML config when the
+user asks for a goal attached to that specific agent. Common requests include
+"set up a goal", "the goal of this agent should be...", "give `optimizer` a
+goal", or "this agent should keep working toward...".
+
+A goal block is metadata attached to one owning agent. In the browser chart it
+appears as a stacked goal card above that agent with a small `<->` association
+line. It is not a separate executable block, not a benchmark, and not a graph
+loop condition.
+
+Use goal cards for per-agent intent:
+
+- "The goal of `optimizer` is to make the code faster" means add a `goal` block inside `## optimizer`.
+- "The reviewer agent's goal is to find safety issues" means add a `goal` block inside `## reviewer`.
+- "Set up a goal for the writer" means attach the goal to the writer agent card, not to the whole flow.
+
+~~~markdown
+## optimizer
+
+```yaml
+inputs:
+  code:
+    from: external
+  target_ms:
+    from: external
+start:
+  - always: {max_runs: 1}
+prompt_executor: codex_cli
+```
+
+```goal
+objective: Optimize the JAX code until it runs under target_ms.
+validation:
+  - Return a complete fenced Python block.
+  - Preserve public function names and behavior.
+  - Explain any remaining benchmark risk in the handoff note.
+max_turns: 5
+on_exhaustion: escalate
+```
+
+Use the latest fenced Python block in `code` as the starting point. Preserve
+public function names and behavior. Return only the final fenced Python code
+block followed by a short handoff note.
+~~~
+
+The runtime injects the goal objective and validation criteria into the prompt
+sent to the agent. The browser UI renders the goal as a stacked metadata card
+above the agent with a small `<->` association line, so it does not look like a
+normal executable block.
+
+Goal `validation` text is an agent-facing contract. It tells the agent what
+"done" should mean for that agent. It does not replace deterministic tests,
+benchmarks, or parser checks. If the flow must prove something with code, add a
+normal programmatic block.
+
+### Programmatic Loop Gate Is Separate
+
+When the user asks for a loop of several agents followed by a concrete check,
+use ordinary flow blocks and a code gate. For example:
+
+> Define a loop of several agents and at the end check programmatically that the
+> code is faster.
+
+This is not a single goal card. Model it as agent blocks plus a deterministic
+`benchmark` block. The benchmark output drives the loop:
+
+~~~markdown
+## speed_agent
+
+```yaml
+inputs:
+  code:
+    from: external
+    fallback: benchmark
+  benchmark_result:
+    from: benchmark
+    fallback: external
+start:
+  - always: {max_runs: 1}
+  - when: benchmark
+    contains: too_slow
+    max_runs: 4
+```
+
+Rewrite the code to make it faster while preserving behavior. Use benchmark
+feedback when it is available.
+
+## cleanup_agent
+
+```yaml
+inputs:
+  code:
+    from: speed_agent
+start:
+  - when: speed_agent
+```
+
+Clean up the implementation without making it slower.
+
+## benchmark
+
+```yaml
+inputs:
+  code:
+    from: cleanup_agent
+  target_seconds:
+    from: external
+start:
+  - when: cleanup_agent
+```
+
+```python
+import time
+
+namespace = {}
+started = time.perf_counter()
+exec(inputs["code"], namespace)
+elapsed = time.perf_counter() - started
+target = float(inputs["target_seconds"])
+
+status = "fast_enough" if elapsed < target else "too_slow"
+output = f"{status}\nelapsed={elapsed}\ntarget={target}\n" + inputs["code"]
+```
+~~~
+
+The `benchmark` block is a normal executable card in the graph. Its output text
+contains `too_slow` or `fast_enough`; the `speed_agent` start rule uses that
+text to decide whether to loop. This is the right pattern for measurable
+runtime, correctness, JSON validity, test pass/fail, coverage thresholds, and
+other checks that should be enforced by code.
+
+### Combining Both Patterns
+
+Goal cards and code gates can coexist. If the user says:
+
+> Give the speed agent a goal to minimize runtime, then loop through cleanup and
+> benchmark until the code is fast enough.
+
+Do both:
+
+- Add a `goal` block inside `## speed_agent` because the goal belongs to that one agent card.
+- Add a separate `## benchmark` code block because "fast enough" must be measured programmatically.
+- Use `start` conditions on `speed_agent` or another agent to loop when `benchmark` outputs `too_slow`.
+
+For future multi-turn headless Codex-backed goals, do not send `/goal` through
+`codex exec`. Instead, implement a goal executor that:
+
+1. Starts a persistent `codex exec --json` thread without `--ephemeral`.
+2. Captures the exact `thread_id` from the JSONL stream.
+3. Asks Codex to return structured status such as `complete`, `continue`, or `blocked`.
+4. Calls `codex exec resume <thread_id> "Continue toward the same goal..."` when status is `continue`.
+5. Stops on `complete`, `blocked`, `max_turns`, timeout, or an exhaustion policy.
+
+Never use `codex exec resume --last` inside Flows; parallel blocks make it
+unsafe. Always resume the captured thread ID for the block.
+
 ## JAX Optimization Example
 
-This is the canonical real-life example. It starts with real but poorly optimized JAX code and sends it through agents with distinct goals:
+This is the canonical real-life example. It starts with real but poorly optimized JAX code and sends it through agents with distinct responsibilities:
 
 1. Minimize runtime.
 2. Minimize memory.
@@ -580,7 +881,7 @@ When real execution is required:
 Good flow files are readable as documents before they are executed.
 
 - Give blocks action-oriented names: `speed_agent`, `benchmark`, `summarize_failures`.
-- Keep each agent prompt focused on one goal.
+- Keep each agent prompt focused on one responsibility; use a fenced `goal` block only when the user wants a visible goal card attached to that agent.
 - Make all cross-block data movement explicit.
 - Put deterministic checks in code blocks instead of asking agents to self-report success.
 - Use small loop limits unless the user explicitly wants long autonomous runs.

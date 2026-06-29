@@ -201,3 +201,51 @@ func TestSerializeMinimalFlow(t *testing.T) {
 		t.Errorf("agent prompt_executor: got %q, want anthropic_api", flow2.Agents[0].PromptExecutor)
 	}
 }
+
+func TestSerializeGoalBlock(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "Goal Flow",
+		ExternalInputs: []string{"topic"},
+		Agents: []model.Agent{
+			{
+				Name:     "writer",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"topic": {From: "external"}},
+				Start:    []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+				Goal: &model.Goal{
+					Objective:    "Write exactly three concise bullets.",
+					Validation:   []string{"Exactly three lines.", "Each line starts with '- '."},
+					MaxTurns:     2,
+					OnExhaustion: "escalate",
+				},
+				Content: "Write the bullets for the supplied topic.",
+			},
+		},
+	}
+
+	output, err := Serialize(flow)
+	if err != nil {
+		t.Fatalf("serialize: %v", err)
+	}
+	if !strings.Contains(string(output), "```goal\n") {
+		t.Fatalf("serialized output missing goal block:\n%s", string(output))
+	}
+
+	flow2, err := parser.Parse(output)
+	if err != nil {
+		t.Fatalf("round-trip parse: %v\n\nSerialized output:\n%s", err, string(output))
+	}
+	goal := flow2.Agents[0].Goal
+	if goal == nil {
+		t.Fatal("goal missing after round-trip")
+	}
+	if goal.Objective != "Write exactly three concise bullets." {
+		t.Fatalf("objective = %q", goal.Objective)
+	}
+	if len(goal.Validation) != 2 {
+		t.Fatalf("validation len = %d, want 2", len(goal.Validation))
+	}
+	if strings.Contains(flow2.Agents[0].Content, "```goal") {
+		t.Fatalf("goal block leaked into content: %q", flow2.Agents[0].Content)
+	}
+}

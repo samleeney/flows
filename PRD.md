@@ -311,8 +311,8 @@ When a loop hits `max_runs` without the exit condition being met, the runtime
 needs a configurable policy:
 
 - `stop` — halt the entire flow and report an error (default)
-- `continue` — proceed to downstream agents as if the exit condition was met
-- `escalate` — fire a designated error-handler agent
+- `continue` — mark the exhausted route handled and let the flow finish or proceed
+- `<agent_name>` — fire a designated route-handler agent once
 
 This is configurable per-agent in the YAML config block:
 
@@ -322,6 +322,19 @@ start:
     max_runs: 5
     on_exhaustion: continue
 ```
+
+Or per start condition as a route:
+
+```yaml
+start:
+  - when: benchmark
+    contains: too_slow
+    max_runs: 3
+    on_exhaustion: escalate
+```
+
+The route target can be a normal agent with its own `start` rules, or a
+route-only agent with no ordinary `start` conditions.
 
 ---
 

@@ -43,6 +43,35 @@ start:
     max_runs: 3
 ```
 
+When a loop exhausts its `max_runs` cap, `on_exhaustion` can either use a
+reserved policy (`stop` or `continue`) or route to another agent by name:
+
+```yaml
+start:
+  - when: benchmark
+    contains: too_slow
+    max_runs: 3
+    on_exhaustion: escalate
+```
+
+The `escalate` block can omit ordinary `start` conditions if it is only reached
+through this route.
+
+Agents can also have an attached goal block immediately after their YAML config:
+
+````markdown
+```goal
+objective: Write exactly three concise action bullets.
+validation:
+  - Return exactly three bullet lines.
+  - Each line starts with "- ".
+max_turns: 1
+```
+````
+
+The browser renders it as a stacked metadata card above the owning agent with a
+small `<->` association line, not as a separate executable node.
+
 That makes the document both readable and executable: fuzzy optimization steps
 are linked to a programmatic benchmark, and the benchmark controls whether the
 agent loop continues.

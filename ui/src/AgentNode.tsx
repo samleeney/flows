@@ -23,7 +23,7 @@ interface AgentRole {
 }
 
 interface RoleBadgeProps {
-  label: "START" | "END";
+  label: "START" | "END" | "GOAL";
   title: string;
 }
 
@@ -79,6 +79,8 @@ function roleColors(label: RoleBadgeProps["label"]) {
   switch (label) {
     case "START":
       return { bg: "#dcfce7", border: "#86efac", color: "#166534" };
+    case "GOAL":
+      return { bg: "#ede9fe", border: "#c4b5fd", color: "#5b21b6" };
     case "END":
     default:
       return { bg: "#ffe4e6", border: "#fda4af", color: "#9f1239" };
@@ -168,7 +170,8 @@ export function AgentNode({ data }: AgentNodeProps) {
   const iter = liveState?.iter ?? 0;
   const colors = colorsFor(status, isFunction);
   const labelDisplay = formatLabel(label, status, iter);
-  const hasRoleBadge = role?.isStart || role?.isFinish || role?.isStopGate;
+  const hasRoleBadge =
+    role?.isStart || role?.isFinish || role?.isStopGate || agent.goal;
 
   return (
     <div
@@ -189,6 +192,12 @@ export function AgentNode({ data }: AgentNodeProps) {
           : undefined,
       }}
     >
+      <Handle
+        id="goal-in"
+        type="target"
+        position={Position.Top}
+        style={{ opacity: 0 }}
+      />
       <Handle
         id="ctrl-in"
         type="target"
@@ -255,6 +264,9 @@ export function AgentNode({ data }: AgentNodeProps) {
         >
           {role?.isStart && (
             <RoleBadge label="START" title="Runs from an always condition" />
+          )}
+          {agent.goal && (
+            <RoleBadge label="GOAL" title={agent.goal.objective} />
           )}
           {(role?.isFinish || role?.isStopGate) && (
             <RoleBadge

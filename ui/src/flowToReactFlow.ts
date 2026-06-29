@@ -9,6 +9,8 @@ const INPUT_NODE_WIDTH = 180;
 const INPUT_NODE_HEIGHT = 42;
 const OUTPUT_NODE_WIDTH = 170;
 const OUTPUT_NODE_HEIGHT = 46;
+const GOAL_NODE_WIDTH = 210;
+const GOAL_NODE_HEIGHT = 104;
 const TERMINAL_NODE_WIDTH = 116;
 const TERMINAL_NODE_HEIGHT = 54;
 const LOOP_FRAME_MIN_WIDTH = 360;
@@ -17,6 +19,9 @@ const PORT_SIZE = 8;
 const TIME_RANK_SPACING = 820;
 const INPUT_OFFSET_X = 260;
 const OUTPUT_OFFSET_X = AGENT_NODE_WIDTH + 28;
+const SIDECAR_GAP_Y = 18;
+const GOAL_OFFSET_Y = GOAL_NODE_HEIGHT + 22;
+const GOAL_CENTER_OFFSET_X = (AGENT_NODE_WIDTH - GOAL_NODE_WIDTH) / 2;
 const LOOP_FRAME_PADDING_X = 92;
 const LOOP_FRAME_PADDING_TOP = 86;
 const LOOP_FRAME_PADDING_BOTTOM = 128;
@@ -26,6 +31,7 @@ const EXIT_LANE_GAP = 360;
 const ROUTE_COLOR = "#111827";
 const END_ROUTE_COLOR = "#475569";
 const DATA_COLOR = "#0d9488";
+const GOAL_COLOR = "#7c3aed";
 
 interface LoopColor {
   stroke: string;
@@ -97,6 +103,7 @@ export const outputNodeId = (
 ) => `output:${source}:${target}:${input}${isFallback ? ":fallback" : ""}`;
 export const triggerOutputNodeId = (source: string, target: string) =>
   `trigger-output:${source}:${target}`;
+export const goalNodeId = (agent: string) => `goal:${agent}`;
 
 function labelLetter(agent: AgentJSON): string {
   if (agent.node_type === "prompt") return "A";
@@ -130,6 +137,7 @@ export function flowToNodes(
   const agentNodes: Node[] = flow.agents.map((agent) => ({
     id: agent.name,
     type: agent.node_type === "function" ? "functionNode" : "agentNode",
+    zIndex: 20,
     position: {
       x: agent.position[0] * GRID_SIZE,
       y: agent.position[1] * GRID_SIZE,
@@ -147,6 +155,7 @@ export function flowToNodes(
     {
       id: START_NODE_ID,
       type: "terminalNode",
+      zIndex: 20,
       position: { x: 0, y: 0 },
       data: {
         kind: "terminal",
@@ -158,6 +167,7 @@ export function flowToNodes(
     {
       id: END_NODE_ID,
       type: "terminalNode",
+      zIndex: 20,
       position: {
         x:
           (Math.max(0, ...Array.from(ranks.values())) + 2) *
@@ -199,9 +209,14 @@ export function flowToNodes(
     Object.entries(agent.inputs).map(([inputName, input], i) => ({
       id: inputNodeId(agent.name, inputName),
       type: "inputNode",
+      zIndex: 20,
       position: {
         x: (agent.position[0] - 1) * GRID_SIZE,
-        y: (agent.position[1] + i) * GRID_SIZE,
+        y:
+          agent.position[1] * GRID_SIZE +
+          AGENT_NODE_HEIGHT +
+          SIDECAR_GAP_Y +
+          i * (INPUT_NODE_HEIGHT + 12),
       },
       data: {
         kind: "input",
@@ -215,12 +230,34 @@ export function flowToNodes(
     }))
   );
 
+  const goalNodes: Node[] = flow.agents
+    .filter((agent) => agent.goal)
+    .map((agent) => ({
+      id: goalNodeId(agent.name),
+      type: "goalNode",
+      zIndex: 20,
+      position: {
+        x: agent.position[0] * GRID_SIZE + GOAL_CENTER_OFFSET_X,
+        y: agent.position[1] * GRID_SIZE - GOAL_OFFSET_Y,
+      },
+      data: {
+        kind: "goal",
+        target: agent.name,
+        objective: agent.goal?.objective ?? "",
+        validation: agent.goal?.validation,
+        maxTurns: agent.goal?.max_turns,
+        tokenBudget: agent.goal?.token_budget,
+        onExhaustion: agent.goal?.on_exhaustion,
+      },
+    }));
+
   const outputNodes: Node[] = connections.dataConnections.map((conn) => {
     const key = edgeKey(conn.source, conn.target);
     const isFeedback = isFeedbackEdge(ranks, conn.source, conn.target);
     return {
       id: outputNodeId(conn.source, conn.target, conn.inputName, conn.isFallback),
       type: "outputNode",
+      zIndex: 20,
       position: { x: 0, y: 0 },
       data: {
         kind: "output",
@@ -244,6 +281,7 @@ export function flowToNodes(
     return {
       id: triggerOutputNodeId(trigger.source, trigger.target),
       type: "outputNode",
+      zIndex: 20,
       position: { x: 0, y: 0 },
       data: {
         kind: "output",
@@ -262,6 +300,7 @@ export function flowToNodes(
     ...terminalNodes,
     ...agentNodes,
     ...inputNodes,
+    ...goalNodes,
     ...outputNodes,
     ...triggerOutputNodes,
   ];
@@ -296,6 +335,9 @@ export function flowToEdges(flow: FlowJSON): Edge[] {
     const always = agent.start.find((cond) => !!cond.always)?.always;
     if (always) {
       edges.push(startToBlockEdge(agent.name, always.max_runs));
+    }
+    if (agent.goal) {
+      edges.push(goalToBlockEdge(agent.name));
     }
   }
 
@@ -877,7 +919,7 @@ function startToBlockEdge(target: string, maxRuns: number): Edge {
       stroke: ROUTE_COLOR,
     },
     markerEnd: { type: MarkerType.ArrowClosed, color: ROUTE_COLOR },
-    zIndex: 10,
+    zIndex: 0,
     data: { isRoute: true, isStartRoute: true },
   } as Edge;
 }
@@ -910,7 +952,7 @@ function blockToEndEdge(
       stroke: END_ROUTE_COLOR,
     },
     markerEnd: { type: MarkerType.ArrowClosed, color: END_ROUTE_COLOR },
-    zIndex: 10,
+    zIndex: 0,
     data: { isRoute: true, isEndRoute: true },
   } as Edge;
 }
@@ -932,6 +974,26 @@ function inputToBlockEdge(target: string, inputName: string): Edge {
     markerEnd: { type: MarkerType.Arrow, color: "#94a3b8" },
     zIndex: 0,
     data: { isLocalInput: true },
+  } as Edge;
+}
+
+function goalToBlockEdge(target: string): Edge {
+  return {
+    id: `${goalNodeId(target)}<->${target}`,
+    type: "straight",
+    source: goalNodeId(target),
+    target,
+    sourceHandle: "goal-out",
+    targetHandle: "goal-in",
+    interactionWidth: 12,
+    style: {
+      strokeWidth: 1.8,
+      stroke: GOAL_COLOR,
+    },
+    markerStart: { type: MarkerType.Arrow, color: GOAL_COLOR },
+    markerEnd: { type: MarkerType.Arrow, color: GOAL_COLOR },
+    zIndex: 2,
+    data: { isGoalLink: true },
   } as Edge;
 }
 
@@ -973,7 +1035,7 @@ function sourceToOutputEdge(
       type: isRoute || isFeedback ? MarkerType.ArrowClosed : MarkerType.Arrow,
       color,
     },
-    zIndex: isRoute || isFeedback ? 10 : 1,
+    zIndex: isRoute || isFeedback ? 1 : 0,
     data: { isFeedback, isOutput: true, isRoute },
   } as Edge;
 }
@@ -1016,7 +1078,7 @@ function outputToInputEdge(
       type: isRoute || isFeedback ? MarkerType.ArrowClosed : MarkerType.Arrow,
       color,
     },
-    zIndex: isRoute || isFeedback ? 10 : 1,
+    zIndex: isRoute || isFeedback ? 1 : 0,
     data: { isFeedback, isOutput: true, isRoute },
   } as Edge;
 }
@@ -1042,7 +1104,7 @@ function sourceToTriggerOutputEdge(
       stroke: color,
     },
     markerEnd: { type: MarkerType.ArrowClosed, color },
-    zIndex: 10,
+    zIndex: 0,
     data: { isFeedback, isTrigger: true, isRoute: true },
   } as Edge;
 }
@@ -1069,7 +1131,7 @@ function triggerOutputToBlockEdge(
       stroke: color,
     },
     markerEnd: { type: MarkerType.ArrowClosed, color },
-    zIndex: 10,
+    zIndex: 0,
     data: { isFeedback, isTrigger: true, isRoute: true },
   } as Edge;
 }
@@ -1207,6 +1269,17 @@ function enforceTimelinePositions(flow: FlowJSON, nodes: Node[]): Node[] {
       source?: string;
       target?: string;
     };
+    if (data.kind === "goal" && data.target) {
+      const target = agentPositions.get(data.target);
+      if (!target) return node;
+      return {
+        ...node,
+        position: {
+          x: target.x + GOAL_CENTER_OFFSET_X,
+          y: target.y - GOAL_OFFSET_Y,
+        },
+      };
+    }
     if (data.kind === "input" && data.target) {
       const target = agentPositions.get(data.target);
       if (!target) return node;
@@ -1337,6 +1410,9 @@ function nodeBelongsToLoopBody(node: Node, bodyAgents: Set<string>): boolean {
   if (data.kind === "output" && data.source) {
     return bodyAgents.has(data.source);
   }
+  if (data.kind === "goal" && data.target) {
+    return bodyAgents.has(data.target);
+  }
   return false;
 }
 
@@ -1425,9 +1501,15 @@ function inputOffsetY(flow: FlowJSON, inputNodeIdValue: string): number {
     const index = names.findIndex(
       (inputName) => inputNodeId(agent.name, inputName) === inputNodeIdValue
     );
-    if (index >= 0) return 18 + index * (INPUT_NODE_HEIGHT + 12);
+    if (index >= 0) {
+      return (
+        AGENT_NODE_HEIGHT +
+        SIDECAR_GAP_Y +
+        index * (INPUT_NODE_HEIGHT + 12)
+      );
+    }
   }
-  return 18;
+  return AGENT_NODE_HEIGHT + SIDECAR_GAP_Y;
 }
 
 function outputIndexesByNode(nodes: Node[]): Map<string, number> {
@@ -1515,17 +1597,19 @@ function edgeToElkEdge(edge: Edge): ElkExtendedEdge {
 
 function portsForNode(node: Node): ElkPort[] {
   return [
+    elkPort(node.id, "goal-in", "NORTH", 0),
     elkPort(node.id, "ctrl-in", "WEST", 0),
     elkPort(node.id, "data-in", "WEST", 1),
     elkPort(node.id, "ctrl-out", "EAST", 0),
     elkPort(node.id, "data-out", "EAST", 1),
+    elkPort(node.id, "goal-out", "SOUTH", 0),
   ];
 }
 
 function elkPort(
   nodeId: string,
   handleId: string,
-  side: "WEST" | "EAST",
+  side: "WEST" | "EAST" | "NORTH" | "SOUTH",
   index: number
 ): ElkPort {
   return {
@@ -1557,6 +1641,12 @@ function estimatedNodeSize(node: Node): { width: number; height: number } {
     return {
       width: Math.max(OUTPUT_NODE_WIDTH, estimateTextWidth(name, 11) + 112),
       height: OUTPUT_NODE_HEIGHT,
+    };
+  }
+  if (kind === "goal") {
+    return {
+      width: GOAL_NODE_WIDTH,
+      height: GOAL_NODE_HEIGHT,
     };
   }
   if (kind === "terminal") {

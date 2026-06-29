@@ -369,6 +369,66 @@ func TestRunLoopExhaustionContinuePolicyAllowsCompletion(t *testing.T) {
 	}
 }
 
+func TestRunLoopExhaustionRoutesToAgent(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "ExhaustionRoute",
+		ExternalInputs: []string{"code"},
+		Agents: []model.Agent{
+			{
+				Name:     "reviewer",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"code": {From: "fixer", Fallback: "external"}},
+				Start: []model.Condition{
+					{Always: &model.AlwaysCondition{MaxRuns: 1}},
+					{When: model.StringOrList{"fixer"}, MaxRuns: 2, OnExhaustion: "escalate"},
+				},
+				Content: "Review code.",
+			},
+			{
+				Name:     "fixer",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"feedback": {From: "reviewer"}},
+				Start:    []model.Condition{{When: model.StringOrList{"reviewer"}, Contains: "needs_changes"}},
+				Content:  "Fix issues.",
+			},
+			{
+				Name:     "escalate",
+				NodeType: model.PromptNode,
+				Inputs: map[string]model.Input{
+					"code":     {From: "external"},
+					"feedback": {From: "reviewer"},
+				},
+				Content: "Escalate unresolved issues.",
+			},
+		},
+	}
+
+	mock := &mockPromptExecutor{
+		responder: func(content string, inputs map[string]string) string {
+			switch {
+			case strings.Contains(content, "Review"):
+				return "needs_changes: still broken"
+			case strings.Contains(content, "Fix"):
+				return "fixed code"
+			case strings.Contains(content, "Escalate"):
+				return "escalated: " + inputs["feedback"]
+			default:
+				return "unexpected"
+			}
+		},
+	}
+
+	result, err := Run(context.Background(), flow, NewExecutorRegistry(mock), RunOptions{
+		ExternalInputs: map[string]string{"code": "buggy code"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Outputs["escalate"] != "escalated: needs_changes: still broken" {
+		t.Fatalf("escalate output = %q", result.Outputs["escalate"])
+	}
+}
+
 func TestRunParallelExecution(t *testing.T) {
 	flow := &model.Flow{
 		Name:           "Parallel",

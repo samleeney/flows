@@ -103,6 +103,97 @@ func TestValidateMissingStartCondition(t *testing.T) {
 	}
 }
 
+func TestValidateExhaustionRouteAllowsRouteOnlyAgent(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "Test",
+		ExternalInputs: []string{"data"},
+		Agents: []model.Agent{
+			{
+				Name:     "worker",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"data": {From: "external"}},
+				Start: []model.Condition{
+					{Always: &model.AlwaysCondition{MaxRuns: 1}},
+					{When: model.StringOrList{"retry"}, MaxRuns: 1, OnExhaustion: "escalate"},
+				},
+				Content: "Do work.",
+			},
+			{
+				Name:     "retry",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"data": {From: "worker"}},
+				Start:    []model.Condition{{When: model.StringOrList{"worker"}}},
+				Content:  "Retry work.",
+			},
+			{
+				Name:     "escalate",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"data": {From: "worker"}},
+				Start:    []model.Condition{},
+				Content:  "Escalate failure.",
+			},
+		},
+	}
+
+	if err := Validate(flow); err != nil {
+		t.Fatalf("expected valid exhaustion route, got: %v", err)
+	}
+}
+
+func TestValidateUnknownOnExhaustionRoute(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "Test",
+		ExternalInputs: []string{"data"},
+		Agents: []model.Agent{
+			{
+				Name:     "worker",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"data": {From: "external"}},
+				Start: []model.Condition{
+					{Always: &model.AlwaysCondition{MaxRuns: 1}},
+					{When: model.StringOrList{"worker"}, MaxRuns: 1, OnExhaustion: "missing_agent"},
+				},
+				Content: "Do work.",
+			},
+		},
+	}
+
+	err := Validate(flow)
+	if err == nil {
+		t.Fatal("expected validation error for unknown on_exhaustion route")
+	}
+	if !strings.Contains(err.Error(), "missing_agent") {
+		t.Fatalf("error = %v, want missing_agent", err)
+	}
+}
+
+func TestValidateSelfOnExhaustionRoute(t *testing.T) {
+	flow := &model.Flow{
+		Name:           "Test",
+		ExternalInputs: []string{"data"},
+		Agents: []model.Agent{
+			{
+				Name:     "worker",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"data": {From: "external"}},
+				Start: []model.Condition{
+					{Always: &model.AlwaysCondition{MaxRuns: 1}},
+					{When: model.StringOrList{"worker"}, MaxRuns: 1, OnExhaustion: "worker"},
+				},
+				Content: "Do work.",
+			},
+		},
+	}
+
+	err := Validate(flow)
+	if err == nil {
+		t.Fatal("expected validation error for self on_exhaustion route")
+	}
+	if !strings.Contains(err.Error(), "same agent") {
+		t.Fatalf("error = %v, want self-route error", err)
+	}
+}
+
 func TestValidateCycleWithoutMaxRuns(t *testing.T) {
 	flow := &model.Flow{
 		Name:           "Test",
