@@ -167,9 +167,12 @@ exit 2
 		t.Fatalf("read prompt log: %v", err)
 	}
 	if strings.Contains(string(prompt), "Do not edit files") {
-		t.Fatalf("write executor prompt still forbids edits:\n%s", string(prompt))
+		t.Fatalf("codex prompt unexpectedly contains read-only policy:\n%s", string(prompt))
 	}
-	if !strings.Contains(string(prompt), "You may edit files in the workspace") {
-		t.Fatalf("write executor prompt missing edit policy:\n%s", string(prompt))
+	if strings.Contains(string(prompt), "You may edit files in the workspace") {
+		t.Fatalf("codex prompt unexpectedly contains write policy:\n%s", string(prompt))
+	}
+	if !strings.Contains(string(prompt), "Block prompt:\nEdit the repository to fix the failing test.") {
+		t.Fatalf("codex prompt missing authored block prompt:\n%s", string(prompt))
 	}
 }

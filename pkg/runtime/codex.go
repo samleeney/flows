@@ -117,10 +117,6 @@ func (e *CodexCLIExecutor) ExecuteAgent(ctx context.Context, req ExecutionReques
 }
 
 func (e *CodexCLIExecutor) buildCodexPrompt(req ExecutionRequest) string {
-	systemPrompt, userPrompt := buildLLMPrompt(req)
-	editPolicy := "Do not edit files. Do not apply patches. Return only the final node output requested by the node prompt."
-	if e.cfg.AllowEdits {
-		editPolicy = "You may edit files in the workspace only when the node prompt explicitly asks for file changes. Return a concise final node output describing the result requested by the node prompt."
-	}
-	return systemPrompt + "\n\n" + editPolicy + "\n\n" + userPrompt
+	_, userPrompt := buildLLMPrompt(req)
+	return userPrompt
 }

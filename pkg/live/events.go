@@ -22,6 +22,18 @@ const (
 	StatusFailed AgentStatus = "failed"
 )
 
+// ExternalInputOrigin describes where a caller-supplied input came from for a
+// specific run. Values are previewed and capped by the caller before emission.
+type ExternalInputOrigin struct {
+	Name             string `json:"name"`
+	Source           string `json:"source"` // inline or file
+	Path             string `json:"path,omitempty"`
+	FileName         string `json:"file_name,omitempty"`
+	Bytes            int    `json:"bytes,omitempty"`
+	Preview          string `json:"preview,omitempty"`
+	PreviewTruncated bool   `json:"preview_truncated,omitempty"`
+}
+
 // EventEnvelope is the wire format for a single live event. Unused fields
 // for a given Kind are omitted via json:"omitempty".
 type EventEnvelope struct {
@@ -41,6 +53,8 @@ type EventEnvelope struct {
 	OutputTruncated bool        `json:"output_truncated,omitempty"`
 	Error           string      `json:"error,omitempty"`
 	OK              *bool       `json:"ok,omitempty"`
+
+	ExternalInputs []ExternalInputOrigin `json:"external_inputs,omitempty"`
 }
 
 // Observer is the runtime-facing event sink. Publish is fire-and-forget and

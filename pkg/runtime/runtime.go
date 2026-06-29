@@ -4,6 +4,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,10 +18,11 @@ const PreviewMaxBytes = 4096
 
 // RunOptions configures a flow execution.
 type RunOptions struct {
-	ExternalInputs map[string]string
-	Verbose        bool
-	OnAgentStart   func(name string, iteration int)
-	OnAgentDone    func(name string, iteration int, output string, err error)
+	ExternalInputs       map[string]string
+	ExternalInputOrigins map[string]live.ExternalInputOrigin
+	Verbose              bool
+	OnAgentStart         func(name string, iteration int)
+	OnAgentDone          func(name string, iteration int, output string, err error)
 
 	// Live event emission. Both fields are optional; if Observer is nil, a
 	// NopObserver is used and FlowKey is ignored.
@@ -480,7 +482,30 @@ func (s *flowState) emit(env live.EventEnvelope) {
 }
 
 func (s *flowState) emitRunStarted() {
-	s.emit(live.EventEnvelope{Kind: live.KindRunStarted})
+	s.emit(live.EventEnvelope{
+		Kind:           live.KindRunStarted,
+		ExternalInputs: externalInputOriginsList(s.opts.ExternalInputOrigins),
+	})
+}
+
+func externalInputOriginsList(origins map[string]live.ExternalInputOrigin) []live.ExternalInputOrigin {
+	if len(origins) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(origins))
+	for name := range origins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]live.ExternalInputOrigin, 0, len(names))
+	for _, name := range names {
+		origin := origins[name]
+		if origin.Name == "" {
+			origin.Name = name
+		}
+		out = append(out, origin)
+	}
+	return out
 }
 
 func (s *flowState) emitAgentStarted(name string, iter int) {

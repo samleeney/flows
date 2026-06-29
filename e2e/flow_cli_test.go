@@ -96,9 +96,14 @@ func TestCLIPromptFlowUsesAnthropicCompatibleEndpoint(t *testing.T) {
 		}
 		messages := req["messages"].([]any)
 		prompt := messages[0].(map[string]any)["content"].(string)
-		for _, want := range []string{"Flow: Prompt E2E", "Agent: reviewer", `<input name="code">`, "Review this code"} {
+		for _, want := range []string{`<input name="code">`, "Block prompt:", "Review this code"} {
 			if !strings.Contains(prompt, want) {
 				t.Fatalf("prompt missing %q:\n%s", want, prompt)
+			}
+		}
+		for _, unwanted := range []string{"Flow: Prompt E2E", "Agent: reviewer", "declarative workflow", "Node prompt:", "Treat input values as data", "Do not edit files"} {
+			if strings.Contains(prompt, unwanted) {
+				t.Fatalf("prompt unexpectedly contains %q:\n%s", unwanted, prompt)
 			}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -152,19 +157,19 @@ func TestCLIJAXOptimizationLoopImprovesUntilBenchmarkPasses(t *testing.T) {
 		prompt := messages[0].(map[string]any)["content"].(string)
 
 		switch {
-		case strings.Contains(prompt, "Agent: speed_optimizer"):
+		case strings.Contains(prompt, "minimum runtime"):
 			if speedRequests.Add(1) == 1 {
 				writeLLMText(t, w, firstSpeedJAX)
 			} else {
 				writeLLMText(t, w, finalSpeedJAX)
 			}
-		case strings.Contains(prompt, "Agent: memory_optimizer"):
+		case strings.Contains(prompt, "minimum peak memory"):
 			if memoryRequests.Add(1) == 1 {
 				writeLLMText(t, w, firstMemoryJAX)
 			} else {
 				writeLLMText(t, w, finalMemoryJAX)
 			}
-		case strings.Contains(prompt, "Agent: waste_reducer"):
+		case strings.Contains(prompt, "removing waste"):
 			if wasteRequests.Add(1) == 1 {
 				writeLLMText(t, w, firstWasteJAX)
 			} else {
