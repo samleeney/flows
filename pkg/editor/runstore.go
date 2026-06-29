@@ -25,14 +25,15 @@ type AgentLiveState struct {
 
 // RunRecord captures the live state of one `flow run` invocation.
 type RunRecord struct {
-	RunID        string                     `json:"run_id"`
-	StartedAt    time.Time                  `json:"started_at"`
-	FinishedAt   *time.Time                 `json:"finished_at,omitempty"`
-	OK           *bool                      `json:"ok,omitempty"`
-	Error        string                     `json:"error,omitempty"`
-	Disconnected bool                       `json:"disconnected"`
-	LastSeq      uint64                     `json:"last_seq"`
-	Agents       map[string]*AgentLiveState `json:"agents"`
+	RunID          string                     `json:"run_id"`
+	StartedAt      time.Time                  `json:"started_at"`
+	FinishedAt     *time.Time                 `json:"finished_at,omitempty"`
+	OK             *bool                      `json:"ok,omitempty"`
+	Error          string                     `json:"error,omitempty"`
+	Disconnected   bool                       `json:"disconnected"`
+	LastSeq        uint64                     `json:"last_seq"`
+	Agents         map[string]*AgentLiveState `json:"agents"`
+	ExternalInputs []live.ExternalInputOrigin `json:"external_inputs,omitempty"`
 }
 
 // RunSnapshot is the WebSocket payload sent on connect and on retention sweeps.
@@ -93,6 +94,7 @@ func (s *RunStore) Apply(env live.EventEnvelope) bool {
 	switch env.Kind {
 	case live.KindRunStarted:
 		rec.StartedAt = env.TS
+		rec.ExternalInputs = copyExternalInputs(env.ExternalInputs)
 	case live.KindAgentStarted:
 		ag := rec.Agents[env.Agent]
 		if ag == nil {
@@ -178,7 +180,17 @@ func deepCopyRun(rec *RunRecord) *RunRecord {
 		ag := *v
 		cp.Agents[k] = &ag
 	}
+	cp.ExternalInputs = copyExternalInputs(rec.ExternalInputs)
 	return &cp
+}
+
+func copyExternalInputs(inputs []live.ExternalInputOrigin) []live.ExternalInputOrigin {
+	if len(inputs) == 0 {
+		return nil
+	}
+	out := make([]live.ExternalInputOrigin, len(inputs))
+	copy(out, inputs)
+	return out
 }
 
 // evictLocked enforces MaxRuns and CompletedRunTTL. Active runs are pinned.

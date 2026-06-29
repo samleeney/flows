@@ -48,6 +48,7 @@ func newRunCmd() *cobra.Command {
 
 			// Parse --input flags
 			externalInputs := make(map[string]string)
+			externalInputOrigins := make(map[string]live.ExternalInputOrigin)
 			for _, kv := range inputs {
 				parts := strings.SplitN(kv, "=", 2)
 				if len(parts) != 2 {
@@ -57,11 +58,15 @@ func newRunCmd() *cobra.Command {
 
 				// @filepath means read from file
 				if strings.HasPrefix(value, "@") {
-					data, err := os.ReadFile(value[1:])
+					path := value[1:]
+					data, err := os.ReadFile(path)
 					if err != nil {
 						return fmt.Errorf("reading input file for %q: %w", name, err)
 					}
 					value = string(data)
+					externalInputOrigins[name] = externalInputOriginFromFile(name, path, value)
+				} else {
+					externalInputOrigins[name] = externalInputOriginFromInline(name, value)
 				}
 				externalInputs[name] = value
 			}
@@ -132,10 +137,11 @@ func newRunCmd() *cobra.Command {
 			defer observer.Close()
 
 			opts := runtime.RunOptions{
-				ExternalInputs: externalInputs,
-				Verbose:        verbose,
-				FlowKey:        flowKey,
-				Observer:       observer,
+				ExternalInputs:       externalInputs,
+				ExternalInputOrigins: externalInputOrigins,
+				Verbose:              verbose,
+				FlowKey:              flowKey,
+				Observer:             observer,
 			}
 
 			if foreground || verbose {
@@ -208,6 +214,34 @@ func buildLiveObserver(descs []live.Descriptor) live.Observer {
 		children = append(children, live.NewHTTPObserver(d.BaseURL, d.Token))
 	}
 	return live.NewFanoutObserver(children...)
+}
+
+func externalInputOriginFromInline(name, value string) live.ExternalInputOrigin {
+	preview, total, truncated := live.TruncatePreviewUTF8(value, runtime.PreviewMaxBytes)
+	return live.ExternalInputOrigin{
+		Name:             name,
+		Source:           "inline",
+		Bytes:            total,
+		Preview:          preview,
+		PreviewTruncated: truncated,
+	}
+}
+
+func externalInputOriginFromFile(name, path, value string) live.ExternalInputOrigin {
+	preview, total, truncated := live.TruncatePreviewUTF8(value, runtime.PreviewMaxBytes)
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		path = filepath.Clean(abs)
+	}
+	return live.ExternalInputOrigin{
+		Name:             name,
+		Source:           "file",
+		Path:             path,
+		FileName:         filepath.Base(path),
+		Bytes:            total,
+		Preview:          preview,
+		PreviewTruncated: truncated,
+	}
 }
 
 func missingExternalInputs(flow *model.Flow, inputs map[string]string) []string {

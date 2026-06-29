@@ -102,8 +102,16 @@ func runFlow(t *testing.T, flowPath, baseURL, token, flowKey string) {
 
 	_, err = runtime.Run(context.Background(), flow, registry, runtime.RunOptions{
 		ExternalInputs: map[string]string{"name": "world"},
-		FlowKey:        flowKey,
-		Observer:       observer,
+		ExternalInputOrigins: map[string]live.ExternalInputOrigin{
+			"name": {
+				Name:    "name",
+				Source:  "inline",
+				Bytes:   len("world"),
+				Preview: "world",
+			},
+		},
+		FlowKey:  flowKey,
+		Observer: observer,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -140,6 +148,13 @@ func TestLiveIntegrationSingleRun(t *testing.T) {
 	}
 	if rec.LastSeq == 0 {
 		t.Fatalf("last_seq = 0, want > 0")
+	}
+	if len(rec.ExternalInputs) != 1 {
+		t.Fatalf("external inputs len = %d, want 1", len(rec.ExternalInputs))
+	}
+	origin := rec.ExternalInputs[0]
+	if origin.Name != "name" || origin.Source != "inline" || origin.Preview != "world" || origin.Bytes != len("world") {
+		t.Fatalf("external input origin = %+v, want inline name/world provenance", origin)
 	}
 	for _, name := range []string{"hello", "shout"} {
 		ag, ok := rec.Agents[name]

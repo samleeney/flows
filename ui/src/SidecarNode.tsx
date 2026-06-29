@@ -1,4 +1,5 @@
 import { Handle, Position } from "@xyflow/react";
+import type { ExternalInputOrigin } from "./types";
 
 interface LoopColor {
   stroke: string;
@@ -22,9 +23,13 @@ interface SidecarNodeProps {
     name: string;
     source?: string;
     sourceKind?: "agent" | "external";
+    sourceBlockLabel?: string;
     fallback?: string;
     fallbackKind?: "agent" | "external";
+    fallbackBlockLabel?: string;
+    externalOrigin?: ExternalInputOrigin;
     target?: string;
+    targetBlockLabel?: string;
     inputName?: string;
     isFallback?: boolean;
     isFeedback?: boolean;
@@ -103,9 +108,10 @@ function SourcePill({
 }
 
 export function InputNode({ data }: SidecarNodeProps) {
+  const headline = inputHeadline(data);
   return (
     <div
-      title={`${data.name} input for ${data.target}`}
+      title={`${headline} as ${data.name} input for ${data.target}`}
       style={{
         width: 180,
         boxSizing: "border-box",
@@ -142,7 +148,7 @@ export function InputNode({ data }: SidecarNodeProps) {
             fontWeight: 800,
           }}
         >
-          {data.name}
+          {headline}
         </span>
       </div>
       <div
@@ -156,12 +162,28 @@ export function InputNode({ data }: SidecarNodeProps) {
           color: "#64748b",
         }}
       >
-        <span>from</span>
-        <SourcePill value={data.source} kind={data.sourceKind} />
+        <span
+          title={data.name}
+          style={{
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          as {data.name}
+        </span>
+        <SourcePill
+          value={inputSourcePill(data, "source")}
+          kind={data.sourceKind}
+        />
         {data.fallback && (
           <>
             <span>else</span>
-            <SourcePill value={data.fallback} kind={data.fallbackKind} />
+            <SourcePill
+              value={inputSourcePill(data, "fallback")}
+              kind={data.fallbackKind}
+            />
           </>
         )}
       </div>
@@ -181,9 +203,44 @@ export function InputNode({ data }: SidecarNodeProps) {
   );
 }
 
+function inputHeadline(data: SidecarNodeProps["data"]) {
+  if (data.sourceKind === "external") {
+    if (data.externalOrigin?.source === "file") {
+      return (
+        data.externalOrigin.file_name ??
+        data.externalOrigin.path ??
+        "file input"
+      );
+    }
+    if (data.externalOrigin?.source === "inline") {
+      return "inline input";
+    }
+    return "external input";
+  }
+
+  if (data.sourceBlockLabel) {
+    return `output ${data.sourceBlockLabel}`;
+  }
+  return data.source ? `output ${data.source}` : data.name;
+}
+
+function inputSourcePill(
+  data: SidecarNodeProps["data"],
+  role: "source" | "fallback"
+) {
+  const kind = role === "source" ? data.sourceKind : data.fallbackKind;
+  const value = role === "source" ? data.source : data.fallback;
+  if (kind !== "external") return value;
+  if (data.externalOrigin?.source === "file") return "file";
+  if (data.externalOrigin?.source === "inline") return "inline";
+  return "external";
+}
+
 export function OutputNode({ data }: SidecarNodeProps) {
   const isConditional = Boolean(data.condition);
   const isLoop = Boolean(data.isFeedback);
+  const headline = outputHeadline(data);
+  const route = outputRoute(data);
   const loopTone = data.loopColor ?? DEFAULT_LOOP_COLOR;
   const border = isLoop ? loopTone.stroke : isConditional ? "#111827" : "#5eead4";
   const background = isLoop
@@ -203,7 +260,7 @@ export function OutputNode({ data }: SidecarNodeProps) {
     : "#0f766e";
   return (
     <div
-      title={`${data.name} output from ${data.source ?? "block"}`}
+      title={`${headline}${route ? ` ${route}` : ""}`}
       style={{
         width: 170,
         boxSizing: "border-box",
@@ -228,7 +285,7 @@ export function OutputNode({ data }: SidecarNodeProps) {
             letterSpacing: 0,
           }}
         >
-          {isLoop ? "LOOP" : "OUTPUT"}
+          {outputBadge(data, isLoop)}
         </span>
         <span
           style={{
@@ -240,7 +297,7 @@ export function OutputNode({ data }: SidecarNodeProps) {
             fontWeight: 800,
           }}
         >
-          {data.name}
+          {headline}
         </span>
       </div>
       <div
@@ -253,8 +310,7 @@ export function OutputNode({ data }: SidecarNodeProps) {
           whiteSpace: "nowrap",
         }}
       >
-        to {data.target}
-        {data.inputName ? `:${data.inputName}` : ""}
+        {route}
       </div>
       {data.condition && (
         <div
@@ -375,6 +431,26 @@ export function GoalNode({ data }: GoalNodeProps) {
       />
     </div>
   );
+}
+
+function outputBadge(data: SidecarNodeProps["data"], isLoop: boolean) {
+  if (isLoop) return "LOOP";
+  return data.inputName ? "OUTPUT" : "ROUTE";
+}
+
+function outputHeadline(data: SidecarNodeProps["data"]) {
+  const source = data.sourceBlockLabel ?? data.source;
+  if (!source) return data.name;
+  return data.inputName ? `output ${source}` : `route ${source}`;
+}
+
+function outputRoute(data: SidecarNodeProps["data"]) {
+  const target = data.targetBlockLabel ?? data.target;
+  if (!target) return "";
+  if (data.inputName) {
+    return `${data.isFallback ? "fallback to" : "to"} ${target} as ${data.inputName}`;
+  }
+  return `starts ${target}`;
 }
 
 export function TerminalNode({ data }: TerminalNodeProps) {

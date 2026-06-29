@@ -1,6 +1,11 @@
 import { MarkerType, type Node, type Edge } from "@xyflow/react";
 import type { ELK, ElkExtendedEdge, ElkNode, ElkPort } from "elkjs";
-import type { FlowJSON, AgentJSON, AgentLiveState } from "./types";
+import type {
+  FlowJSON,
+  AgentJSON,
+  AgentLiveState,
+  ExternalInputOrigin,
+} from "./types";
 
 const GRID_SIZE = 100;
 const AGENT_NODE_WIDTH = 280;
@@ -147,7 +152,7 @@ export function flowToNodes(
       label: labels.get(agent.name) ?? "",
       liveState: agentLive?.[agent.name],
       role: roles.get(agent.name),
-      inputs: summarizeInputs(agent),
+      inputs: summarizeInputs(agent, labels),
     },
   }));
 
@@ -224,8 +229,12 @@ export function flowToNodes(
         target: agent.name,
         source: sourceLabel(input.from),
         sourceKind: sourceKind(input.from),
+        sourceBlockLabel: blockLabel(input.from, labels),
         fallback: input.fallback ? sourceLabel(input.fallback) : undefined,
         fallbackKind: input.fallback ? sourceKind(input.fallback) : undefined,
+        fallbackBlockLabel: input.fallback
+          ? blockLabel(input.fallback, labels)
+          : undefined,
       },
     }))
   );
@@ -263,7 +272,9 @@ export function flowToNodes(
         kind: "output",
         name: conn.label,
         source: conn.source,
+        sourceBlockLabel: labels.get(conn.source),
         target: conn.target,
+        targetBlockLabel: labels.get(conn.target),
         inputName: conn.inputName,
         isFallback: conn.isFallback,
         isFeedback,
@@ -287,7 +298,9 @@ export function flowToNodes(
         kind: "output",
         name: "trigger",
         source: trigger.source,
+        sourceBlockLabel: labels.get(trigger.source),
         target: trigger.target,
+        targetBlockLabel: labels.get(trigger.target),
         isFeedback,
         loopColor: loopByKey.get(trigger.key)?.color,
         condition: conditionSummary(trigger, isFeedback),
@@ -311,15 +324,32 @@ export function flowToNodes(
 // arrive, without rebuilding from scratch.
 export function decorateNodes(
   nodes: Node[],
-  agentLive?: Record<string, AgentLiveState>
+  agentLive?: Record<string, AgentLiveState>,
+  externalInputs?: ExternalInputOrigin[]
 ): Node[] {
+  const externalOrigins = new Map(
+    (externalInputs ?? []).map((origin) => [origin.name, origin])
+  );
   return nodes.map((n) => ({
     ...n,
-    data: {
-      ...(n.data as Record<string, unknown>),
-      liveState: agentLive?.[n.id],
-    },
+    data: decorateNodeData(n, agentLive, externalOrigins),
   }));
+}
+
+function decorateNodeData(
+  node: Node,
+  agentLive?: Record<string, AgentLiveState>,
+  externalOrigins?: Map<string, ExternalInputOrigin>
+) {
+  const data = node.data as Record<string, unknown>;
+  return {
+    ...data,
+    liveState: agentLive?.[node.id],
+    externalOrigin:
+      data.kind === "input"
+        ? externalOrigins?.get(String(data.name ?? ""))
+        : undefined,
+  };
 }
 
 export function flowToEdges(flow: FlowJSON): Edge[] {
@@ -393,8 +423,10 @@ interface InputSummary {
   name: string;
   source: string;
   sourceKind: "agent" | "external";
+  sourceBlockLabel?: string;
   fallback?: string;
   fallbackKind?: "agent" | "external";
+  fallbackBlockLabel?: string;
 }
 
 interface AgentRole {
@@ -455,18 +487,29 @@ interface ConnectionModel {
   triggerOnly: TriggerSpec[];
 }
 
-function summarizeInputs(agent: AgentJSON): InputSummary[] {
+function summarizeInputs(
+  agent: AgentJSON,
+  labels: Map<string, string>
+): InputSummary[] {
   return Object.entries(agent.inputs).map(([name, input]) => ({
     name,
     source: sourceLabel(input.from),
     sourceKind: sourceKind(input.from),
+    sourceBlockLabel: blockLabel(input.from, labels),
     fallback: input.fallback ? sourceLabel(input.fallback) : undefined,
     fallbackKind: input.fallback ? sourceKind(input.fallback) : undefined,
+    fallbackBlockLabel: input.fallback
+      ? blockLabel(input.fallback, labels)
+      : undefined,
   }));
 }
 
 function sourceLabel(source: string): string {
   return source === "external" ? "external" : source;
+}
+
+function blockLabel(source: string, labels: Map<string, string>): string | undefined {
+  return source === "external" ? undefined : labels.get(source);
 }
 
 function sourceKind(source: string): "agent" | "external" {

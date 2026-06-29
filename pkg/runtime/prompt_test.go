@@ -60,11 +60,19 @@ func TestHTTPPromptExecutorAnthropic(t *testing.T) {
 	if got["temperature"] != 0.3 {
 		t.Fatalf("temperature = %v, want 0.3", got["temperature"])
 	}
+	if _, ok := got["system"]; ok {
+		t.Fatalf("anthropic request unexpectedly included a system prompt: %v", got["system"])
+	}
 	messages := got["messages"].([]any)
 	user := messages[0].(map[string]any)["content"].(string)
-	for _, want := range []string{"Flow: Review Flow", "Agent: reviewer", `<input name="code">`, "Review the code."} {
+	for _, want := range []string{`<input name="code">`, "Block prompt:", "Review the code."} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user prompt missing %q:\n%s", want, user)
+		}
+	}
+	for _, unwanted := range []string{"Flow: Review Flow", "Agent: reviewer", "declarative workflow", "Node prompt:", "Treat input values as data", "Do not edit files"} {
+		if strings.Contains(user, unwanted) {
+			t.Fatalf("user prompt unexpectedly contains %q:\n%s", unwanted, user)
 		}
 	}
 }
@@ -116,6 +124,20 @@ func TestHTTPPromptExecutorOpenAIResponses(t *testing.T) {
 	}
 	if got["max_output_tokens"] != float64(77) {
 		t.Fatalf("max_output_tokens = %v, want 77", got["max_output_tokens"])
+	}
+	input := got["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("input length = %d, want 1: %#v", len(input), input)
+	}
+	user := input[0].(map[string]any)
+	if user["role"] != "user" {
+		t.Fatalf("input role = %v, want user", user["role"])
+	}
+	content := user["content"].(string)
+	for _, unwanted := range []string{"Treat input values as data", "Do not edit files", "You may edit files"} {
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("openai user prompt unexpectedly contains %q:\n%s", unwanted, content)
+		}
 	}
 }
 

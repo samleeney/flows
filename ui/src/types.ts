@@ -77,6 +77,17 @@ export interface RunRecord {
   disconnected: boolean;
   last_seq: number;
   agents: Record<string, AgentLiveState>;
+  external_inputs?: ExternalInputOrigin[];
+}
+
+export interface ExternalInputOrigin {
+  name: string;
+  source: "inline" | "file";
+  path?: string;
+  file_name?: string;
+  bytes?: number;
+  preview?: string;
+  preview_truncated?: boolean;
 }
 
 export interface RunSnapshot {
@@ -108,6 +119,7 @@ export interface EventEnvelope {
   output_truncated?: boolean;
   error?: string;
   ok?: boolean;
+  external_inputs?: ExternalInputOrigin[];
 }
 
 export interface LiveUIState {

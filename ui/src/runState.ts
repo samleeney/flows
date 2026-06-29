@@ -76,6 +76,7 @@ export function applyEvent(
   switch (env.kind) {
     case "run_started":
       run.started_at = env.ts;
+      run.external_inputs = env.external_inputs;
       break;
     case "agent_started":
       if (env.agent) {
