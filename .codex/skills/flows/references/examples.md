@@ -17,6 +17,29 @@ A flow is a markdown document that becomes an execution graph.
 
 Good flows make the boundary between fuzzy judgement and deterministic work explicit. Agents should reason, rewrite, decide, or summarize. Code blocks should test, benchmark, parse, score, and enforce conditions.
 
+## Common User Requests
+
+Use these mappings before choosing a longer pattern:
+
+- User says: "Create a flow that summarizes a note."
+  Do: one prompt agent, one external input, `start: - always: {max_runs: 1}`.
+- User says: "Write JSON, then check it is valid."
+  Do: prompt agent for JSON, then a Python `validate_json` block using `json.loads`.
+- User says: "Improve this code until it is faster."
+  Do: prompt agent plus `benchmark` code block; loop on benchmark output such as `too_slow`.
+- User says: "The optimizer's goal is to reduce runtime."
+  Do: add a fenced `goal` block inside `## optimizer`; keep benchmarks separate.
+- User says: "Have three agents review the same code, then combine their advice."
+  Do: three prompt agents reading `from: external`, then a combiner agent with `when: [a, b, c]`.
+- User says: "The next agent should know what the previous agent tried."
+  Do: require the previous agent to output `HANDOFF:` or structured JSON, then pass that output as a named input.
+- User says: "If the loop fails after retries, ask another agent to summarize."
+  Do: use `on_exhaustion: summarize_failure` on the loop rule and define `## summarize_failure`.
+- User says: "Let the flow modify files."
+  Do: use `prompt_executor: codex_cli_write` only on the file-editing agent.
+- User says: "Show me the flow."
+  Do: run `./flow chart file.md` for the browser chart or `./flow viz file.md` for Mermaid output.
+
 ## Minimal Agent Flow
 
 Use this when the user wants a single agent step with one external input.
@@ -173,7 +196,7 @@ Use the provided `failures` input.
 
 ## Multi-Agent Review
 
-Use this pattern when several agents should inspect the same artifact with different goals, then a later block combines their results.
+Use this pattern when several agents should inspect the same artifact with different responsibilities, then a later block combines their results.
 
 ~~~markdown
 ---

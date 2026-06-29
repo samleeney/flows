@@ -27,6 +27,20 @@ Useful commands:
 
 By default, `./flow run <file>` prints a browser link for the run and starts it in the background. With `-f`, it prints the link and tails execution live.
 
+## Request Routing
+
+Map common user wording to Flows constructs:
+
+- If the user says "make a flow that summarizes/reviews/rewrites X", create one prompt agent with an `external_inputs` entry, an `inputs` map using `from: external`, and `start: - always: {max_runs: 1}`.
+- If the user says "then check/validate/test/benchmark it", add a normal programmatic block after the agent. Feed the agent output into that block with `inputs`.
+- If the user says "keep trying until it passes", make the deterministic check emit a clear token such as `passed`/`failed` or `fast_enough`/`too_slow`, then add a feedback `start` rule with `when: checker`, `contains: failed`, and `max_runs`.
+- If the user says "the goal of this agent is..." or "give this agent a goal", add a fenced `goal` block to that agent only. The goal becomes a visual goal card attached to the agent, not a checker or loop.
+- If the user says "at the end of a loop check that the code is faster/correct/valid", use a code block such as `benchmark` or `validate`. Do not model that final check as a goal card.
+- If the user says a later agent needs the prior reasoning, make the earlier agent output a handoff summary or structured artifact, then pass it as a named input. Do not rely on hidden chat history.
+- If the user says "when the loop exhausts, call another agent", set `on_exhaustion: handler_agent` on the loop start rule and define that handler as a normal agent, usually without ordinary `start`.
+- If the user says the flow should edit repository files, use `prompt_executor: codex_cli_write` only on the editing agent. Otherwise use `codex_cli` for prompt agents.
+- If the user says "run/check/show the flow", use `./flow validate`, `./flow run --dry-run`, `./flow run -f`, `./flow chart`, or `./flow viz` as appropriate.
+
 ## Authoring Model
 
 Each flow file has:
@@ -102,6 +116,8 @@ output = {"elapsed": elapsed, "passed": elapsed < 1.0}
 - Use `contains: some_text` plus `max_runs` to express feedback loops.
 - Use `on_exhaustion: stop` for the default error behavior, `on_exhaustion: continue` to mark an exhausted route handled, or `on_exhaustion: <agent_name>` to fire an exhaustion-handler agent once.
 - Allow route-handler agents to omit ordinary `start` conditions when they are only reached through an `on_exhaustion` route.
+- Always include enough `external_inputs` and `inputs` declarations for data to move explicitly through the graph.
+- Always validate new or edited flows with `./flow validate <file>`; use `./flow run <file> --dry-run` before expensive or write-capable execution.
 - Prefer `codex_cli` with a quick Spark model for examples unless the user asks for another executor.
 - Use `codex_cli_write` only for prompt nodes that should edit files in the repository.
 - Use API executors only when the flow is intentionally meant to call an API and the required keys are available.
