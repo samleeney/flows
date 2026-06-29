@@ -54,8 +54,10 @@ func Validate(flow *model.Flow) error {
 		externalInputs[ei] = true
 	}
 
+	exhaustionRouteTargets := findExhaustionRouteTargets(flow, agentNames)
+
 	for _, agent := range flow.Agents {
-		errs = append(errs, validateAgent(&agent, agentNames, externalInputs)...)
+		errs = append(errs, validateAgent(&agent, agentNames, externalInputs, exhaustionRouteTargets)...)
 	}
 
 	cycleErrs := validateCycles(flow)
@@ -67,7 +69,7 @@ func Validate(flow *model.Flow) error {
 	return errs
 }
 
-func validateAgent(agent *model.Agent, agentNames, externalInputs map[string]bool) ValidationErrors {
+func validateAgent(agent *model.Agent, agentNames, externalInputs, exhaustionRouteTargets map[string]bool) ValidationErrors {
 	var errs ValidationErrors
 
 	// Name must be a valid identifier
@@ -135,10 +137,26 @@ func validateAgent(agent *model.Agent, agentNames, externalInputs map[string]boo
 				})
 			}
 		}
+		if err := validateOnExhaustion(agent.Name, fmt.Sprintf("start[%d].on_exhaustion", i), cond.OnExhaustion, agentNames); err != nil {
+			errs = append(errs, *err)
+		}
 	}
 
-	// Must have at least one start condition
-	if len(agent.Start) == 0 {
+	if err := validateOnExhaustion(agent.Name, "on_exhaustion", agent.OnExhaustion, agentNames); err != nil {
+		errs = append(errs, *err)
+	}
+
+	if agent.Goal != nil && strings.TrimSpace(agent.Goal.Objective) == "" {
+		errs = append(errs, ValidationError{
+			Agent:   agent.Name,
+			Field:   "goal.objective",
+			Message: "required",
+		})
+	}
+
+	// Must have at least one start condition unless this agent is only reached
+	// through an exhaustion route.
+	if len(agent.Start) == 0 && !exhaustionRouteTargets[agent.Name] {
 		errs = append(errs, ValidationError{
 			Agent:   agent.Name,
 			Field:   "start",
@@ -156,6 +174,57 @@ func validateAgent(agent *model.Agent, agentNames, externalInputs map[string]boo
 	}
 
 	return errs
+}
+
+func findExhaustionRouteTargets(flow *model.Flow, agentNames map[string]bool) map[string]bool {
+	targets := make(map[string]bool)
+	for _, agent := range flow.Agents {
+		if isExhaustionRoute(agent.OnExhaustion, agentNames) {
+			targets[agent.OnExhaustion] = true
+		}
+		for _, cond := range agent.Start {
+			if isExhaustionRoute(cond.OnExhaustion, agentNames) {
+				targets[cond.OnExhaustion] = true
+			}
+		}
+	}
+	return targets
+}
+
+func validateOnExhaustion(agentName, field, value string, agentNames map[string]bool) *ValidationError {
+	value = strings.TrimSpace(value)
+	if value == "" || isExhaustionPolicy(value) {
+		return nil
+	}
+	if value == agentName {
+		return &ValidationError{
+			Agent:   agentName,
+			Field:   field,
+			Message: "cannot route to the same agent",
+		}
+	}
+	if !agentNames[value] {
+		return &ValidationError{
+			Agent:   agentName,
+			Field:   field,
+			Message: fmt.Sprintf("unsupported policy or unknown route target %q", value),
+		}
+	}
+	return nil
+}
+
+func isExhaustionRoute(value string, agentNames map[string]bool) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && !isExhaustionPolicy(value) && agentNames[value]
+}
+
+func isExhaustionPolicy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "stop", "continue":
+		return true
+	default:
+		return false
+	}
 }
 
 // validateCycles detects cycles in the agent dependency graph and ensures
@@ -179,6 +248,11 @@ func validateCycles(flow *model.Flow) ValidationErrors {
 		for _, dep := range deps {
 			if _, ok := agentMap[dep]; ok {
 				adj[dep] = append(adj[dep], agent.Name)
+			}
+		}
+		for _, target := range exhaustionRoutes(&agent) {
+			if _, ok := agentMap[target]; ok {
+				adj[agent.Name] = append(adj[agent.Name], target)
 			}
 		}
 	}
@@ -256,6 +330,22 @@ func agentDependencies(agent *model.Agent) []string {
 	}
 
 	return deps
+}
+
+func exhaustionRoutes(agent *model.Agent) []string {
+	seen := make(map[string]bool)
+	var routes []string
+	if agent.OnExhaustion != "" && !isExhaustionPolicy(agent.OnExhaustion) {
+		seen[agent.OnExhaustion] = true
+		routes = append(routes, agent.OnExhaustion)
+	}
+	for _, cond := range agent.Start {
+		if cond.OnExhaustion != "" && !isExhaustionPolicy(cond.OnExhaustion) && !seen[cond.OnExhaustion] {
+			seen[cond.OnExhaustion] = true
+			routes = append(routes, cond.OnExhaustion)
+		}
+	}
+	return routes
 }
 
 // cycleHasMaxRuns checks that at least one agent in the cycle has a max_runs cap.

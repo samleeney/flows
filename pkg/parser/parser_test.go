@@ -138,6 +138,68 @@ func TestParseFunctionNode(t *testing.T) {
 	}
 }
 
+func TestParseGoalBlock(t *testing.T) {
+	src := []byte(`---
+name: Goal Flow
+external_inputs:
+  - topic
+---
+
+## writer
+
+` + "```yaml" + `
+inputs:
+  topic: { from: external }
+start:
+  - always: { max_runs: 1 }
+` + "```" + `
+
+` + "```goal" + `
+objective: Write exactly three concise bullets.
+validation:
+  - Exactly three lines.
+  - Each line starts with "- ".
+max_turns: 2
+on_exhaustion: escalate
+` + "```" + `
+
+Write the bullets for the supplied topic.
+`)
+
+	flow, err := Parse(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(flow.Agents) != 1 {
+		t.Fatalf("agents len = %d, want 1", len(flow.Agents))
+	}
+	agent := flow.Agents[0]
+	if agent.Goal == nil {
+		t.Fatal("goal was not parsed")
+	}
+	if agent.Goal.Objective != "Write exactly three concise bullets." {
+		t.Fatalf("goal objective = %q", agent.Goal.Objective)
+	}
+	if len(agent.Goal.Validation) != 2 {
+		t.Fatalf("validation len = %d, want 2", len(agent.Goal.Validation))
+	}
+	if agent.Goal.MaxTurns != 2 {
+		t.Fatalf("max_turns = %d, want 2", agent.Goal.MaxTurns)
+	}
+	if agent.Goal.OnExhaustion != "escalate" {
+		t.Fatalf("on_exhaustion = %q, want escalate", agent.Goal.OnExhaustion)
+	}
+	if agent.NodeType != model.PromptNode {
+		t.Fatalf("node type = %v, want prompt", agent.NodeType)
+	}
+	if strings.Contains(agent.Content, "```goal") {
+		t.Fatalf("goal block leaked into content: %q", agent.Content)
+	}
+	if !strings.Contains(agent.Content, "Write the bullets") {
+		t.Fatalf("prompt content missing: %q", agent.Content)
+	}
+}
+
 func TestParseMissingFrontmatter(t *testing.T) {
 	src := []byte("## agent\n\nSome content\n")
 	_, err := Parse(src)

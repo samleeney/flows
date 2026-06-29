@@ -208,6 +208,14 @@ func parseSection(sec section) (model.Agent, error) {
 	agent.OnError = cfg.OnError
 	agent.OnExhaustion = cfg.OnExhaustion
 
+	afterYAML, parsedGoal, err := extractGoalBlock(afterYAML)
+	if err != nil {
+		return agent, err
+	}
+	if parsedGoal != nil {
+		agent.Goal = parsedGoal
+	}
+
 	// Look at what follows the YAML block. Skip leading blank lines.
 	// If the next non-blank content is a fenced code block in another language,
 	// it's a function node. Otherwise, the remaining text is the prompt.
@@ -225,6 +233,23 @@ func parseSection(sec section) (model.Agent, error) {
 	agent.NodeType = model.PromptNode
 	agent.Content = strings.TrimSpace(afterYAML)
 	return agent, nil
+}
+
+func extractGoalBlock(body string) (after string, parsedGoal *model.Goal, err error) {
+	trimmed := strings.TrimLeft(body, "\n \t")
+	if !(strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")) {
+		return body, nil, nil
+	}
+	lang, content, after, ok := extractFirstCodeBlockAny(trimmed)
+	if !ok || strings.TrimSpace(lang) != "goal" {
+		return body, nil, nil
+	}
+
+	var goal model.Goal
+	if err := yaml.Unmarshal([]byte(content), &goal); err != nil {
+		return "", nil, fmt.Errorf("parsing goal YAML: %w", err)
+	}
+	return after, &goal, nil
 }
 
 // extractFirstCodeBlock finds the first fenced code block with the given

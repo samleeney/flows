@@ -23,6 +23,7 @@ type Agent struct {
 	Position [2]int
 	Inputs   map[string]Input
 	Start    []Condition
+	Goal     *Goal
 	NodeType NodeType
 	Language string // empty for prompt nodes; "python", "bash", etc. for function nodes
 	Content  string // the prompt text or code
@@ -32,6 +33,15 @@ type Agent struct {
 	Temperature    float64 `yaml:"temperature"`
 	OnError        string  `yaml:"on_error"`
 	OnExhaustion   string  `yaml:"on_exhaustion"`
+}
+
+// Goal describes a durable objective attached to an agent block.
+type Goal struct {
+	Objective    string   `yaml:"objective"`
+	Validation   []string `yaml:"validation,omitempty"`
+	MaxTurns     int      `yaml:"max_turns,omitempty"`
+	TokenBudget  int      `yaml:"token_budget,omitempty"`
+	OnExhaustion string   `yaml:"on_exhaustion,omitempty"`
 }
 
 // Input represents a data source for an agent input.

@@ -89,3 +89,35 @@ func TestMermaidMinimal(t *testing.T) {
 		t.Errorf("missing solo node in:\n%s", output)
 	}
 }
+
+func TestMermaidExhaustionRoute(t *testing.T) {
+	flow := &model.Flow{
+		Name: "ExhaustionRoute",
+		Agents: []model.Agent{
+			{
+				Name:     "worker",
+				NodeType: model.PromptNode,
+				Start: []model.Condition{
+					{When: model.StringOrList{"retry"}, MaxRuns: 2, OnExhaustion: "escalate"},
+				},
+				Content: "Do work.",
+			},
+			{
+				Name:     "retry",
+				NodeType: model.PromptNode,
+				Start:    []model.Condition{{When: model.StringOrList{"worker"}}},
+				Content:  "Retry.",
+			},
+			{
+				Name:     "escalate",
+				NodeType: model.PromptNode,
+				Content:  "Escalate.",
+			},
+		},
+	}
+
+	output := Mermaid(flow)
+	if !strings.Contains(output, "worker -->|on exhaustion| escalate") {
+		t.Errorf("missing exhaustion route edge in:\n%s", output)
+	}
+}

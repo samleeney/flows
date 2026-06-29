@@ -106,6 +106,7 @@ type AgentJSON struct {
 	Position       [2]int               `json:"position"`
 	Inputs         map[string]InputJSON `json:"inputs"`
 	Start          []ConditionJSON      `json:"start"`
+	Goal           *GoalJSON            `json:"goal,omitempty"`
 	NodeType       string               `json:"node_type"`
 	Language       string               `json:"language,omitempty"`
 	Content        string               `json:"content"`
@@ -114,6 +115,14 @@ type AgentJSON struct {
 	Temperature    float64              `json:"temperature,omitempty"`
 	OnError        string               `json:"on_error,omitempty"`
 	OnExhaustion   string               `json:"on_exhaustion,omitempty"`
+}
+
+type GoalJSON struct {
+	Objective    string   `json:"objective"`
+	Validation   []string `json:"validation,omitempty"`
+	MaxTurns     int      `json:"max_turns,omitempty"`
+	TokenBudget  int      `json:"token_budget,omitempty"`
+	OnExhaustion string   `json:"on_exhaustion,omitempty"`
 }
 
 type InputJSON struct {
@@ -456,6 +465,7 @@ func agentToJSON(a *model.Agent) AgentJSON {
 		Position:       a.Position,
 		Inputs:         inputs,
 		Start:          conditions,
+		Goal:           goalToJSON(a.Goal),
 		NodeType:       nodeType,
 		Language:       a.Language,
 		Content:        a.Content,
@@ -464,6 +474,19 @@ func agentToJSON(a *model.Agent) AgentJSON {
 		Temperature:    a.Temperature,
 		OnError:        a.OnError,
 		OnExhaustion:   a.OnExhaustion,
+	}
+}
+
+func goalToJSON(goal *model.Goal) *GoalJSON {
+	if goal == nil {
+		return nil
+	}
+	return &GoalJSON{
+		Objective:    goal.Objective,
+		Validation:   goal.Validation,
+		MaxTurns:     goal.MaxTurns,
+		TokenBudget:  goal.TokenBudget,
+		OnExhaustion: goal.OnExhaustion,
 	}
 }
 
@@ -515,6 +538,7 @@ func jsonToAgent(aj *AgentJSON) model.Agent {
 		Position:       aj.Position,
 		Inputs:         inputs,
 		Start:          conditions,
+		Goal:           jsonToGoal(aj.Goal),
 		NodeType:       nodeType,
 		Language:       aj.Language,
 		Content:        aj.Content,
@@ -523,5 +547,18 @@ func jsonToAgent(aj *AgentJSON) model.Agent {
 		Temperature:    aj.Temperature,
 		OnError:        aj.OnError,
 		OnExhaustion:   aj.OnExhaustion,
+	}
+}
+
+func jsonToGoal(goal *GoalJSON) *model.Goal {
+	if goal == nil {
+		return nil
+	}
+	return &model.Goal{
+		Objective:    goal.Objective,
+		Validation:   goal.Validation,
+		MaxTurns:     goal.MaxTurns,
+		TokenBudget:  goal.TokenBudget,
+		OnExhaustion: goal.OnExhaustion,
 	}
 }

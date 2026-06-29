@@ -54,6 +54,18 @@ interface LoopFrameNodeProps {
   };
 }
 
+interface GoalNodeProps {
+  data: {
+    kind: "goal";
+    target: string;
+    objective: string;
+    validation?: string[];
+    maxTurns?: number;
+    tokenBudget?: number;
+    onExhaustion?: string;
+  };
+}
+
 function sourceTone(kind?: "agent" | "external") {
   return kind === "external"
     ? { bg: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8" }
@@ -276,6 +288,90 @@ export function OutputNode({ data }: SidecarNodeProps) {
         type="source"
         position={Position.Right}
         style={{ top: "70%", opacity: 0 }}
+      />
+    </div>
+  );
+}
+
+export function GoalNode({ data }: GoalNodeProps) {
+  const validationCount = data.validation?.length ?? 0;
+  return (
+    <div
+      title={data.objective}
+      style={{
+        width: 210,
+        boxSizing: "border-box",
+        padding: "8px 10px",
+        border: "2px solid #7c3aed",
+        borderRadius: 6,
+        background: "#f5f3ff",
+        color: "#312e81",
+        fontFamily: "system-ui, sans-serif",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <span
+          style={{
+            borderRadius: 4,
+            background: "#ede9fe",
+            color: "#5b21b6",
+            padding: "1px 6px",
+            fontSize: 9,
+            fontWeight: 900,
+            letterSpacing: 0,
+          }}
+        >
+          GOAL
+        </span>
+        <span
+          style={{
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontSize: 12,
+            fontWeight: 800,
+          }}
+        >
+          {data.target}
+        </span>
+      </div>
+      <div
+        style={{
+          marginTop: 6,
+          fontSize: 11,
+          lineHeight: "14px",
+          color: "#4338ca",
+          overflow: "hidden",
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+        }}
+      >
+        {data.objective}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginTop: 6,
+          fontSize: 10,
+          color: "#6d28d9",
+          fontWeight: 700,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {validationCount > 0 && <span>{validationCount} checks</span>}
+        {data.maxTurns ? <span>max {data.maxTurns} turns</span> : null}
+      </div>
+      <Handle
+        id="goal-out"
+        type="source"
+        position={Position.Bottom}
+        style={{ opacity: 0 }}
       />
     </div>
   );

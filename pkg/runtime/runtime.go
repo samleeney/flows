@@ -51,14 +51,16 @@ func Run(ctx context.Context, flow *model.Flow, registry *ExecutorRegistry, opts
 	}
 
 	state := &flowState{
-		flow:     flow,
-		registry: registry,
-		opts:     opts,
-		runID:    runID,
-		outputs:  make(map[string]string),
-		runs:     make(map[string]int),
-		consumed: make(map[string]map[string]int),
-		agents:   make(map[string]*model.Agent),
+		flow:      flow,
+		registry:  registry,
+		opts:      opts,
+		runID:     runID,
+		outputs:   make(map[string]string),
+		runs:      make(map[string]int),
+		consumed:  make(map[string]map[string]int),
+		agents:    make(map[string]*model.Agent),
+		forced:    make(map[string]bool),
+		exhausted: make(map[string]map[int]bool),
 	}
 
 	for i := range flow.Agents {
@@ -74,11 +76,13 @@ type flowState struct {
 	opts     RunOptions
 	runID    string
 
-	mu       sync.Mutex
-	outputs  map[string]string         // agent name → latest output
-	runs     map[string]int            // agent name → invocation count
-	consumed map[string]map[string]int // consumer → {producer → producer.runs at last consumption}
-	agents   map[string]*model.Agent
+	mu        sync.Mutex
+	outputs   map[string]string         // agent name → latest output
+	runs      map[string]int            // agent name → invocation count
+	consumed  map[string]map[string]int // consumer → {producer → producer.runs at last consumption}
+	agents    map[string]*model.Agent
+	forced    map[string]bool         // agents queued by non-dataflow routes
+	exhausted map[string]map[int]bool // agent → start condition indexes already exhausted
 
 	// Live event emission state. emitMu serializes seq allocation AND
 	// observer publish so ordering at the queue is strict.
@@ -100,8 +104,13 @@ func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
 	for {
 		ready := s.findReady()
 		if len(ready) == 0 {
-			if err = s.exhaustionError(); err != nil {
+			routed, exhaustionErr := s.handleExhaustion()
+			if exhaustionErr != nil {
+				err = exhaustionErr
 				return nil, err
+			}
+			if routed {
+				continue
 			}
 			break
 		}
@@ -158,6 +167,11 @@ func (s *flowState) findReady() []*model.Agent {
 	var ready []*model.Agent
 	for i := range s.flow.Agents {
 		agent := &s.flow.Agents[i]
+		if s.forced[agent.Name] {
+			delete(s.forced, agent.Name)
+			ready = append(ready, agent)
+			continue
+		}
 		if s.canFire(agent) {
 			ready = append(ready, agent)
 		}
@@ -244,29 +258,53 @@ func (s *flowState) inputAvailable(name string, input *model.Input) bool {
 	return false
 }
 
-func (s *flowState) exhaustionError() error {
+func (s *flowState) handleExhaustion() (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for i := range s.flow.Agents {
 		agent := &s.flow.Agents[i]
-		for _, cond := range agent.Start {
+		for condIndex, cond := range agent.Start {
+			if s.exhaustionHandled(agent.Name, condIndex) {
+				continue
+			}
 			if !s.conditionExhausted(agent, &cond) {
 				continue
 			}
 			policy := exhaustionPolicy(agent, &cond)
 			switch policy {
 			case "", "stop":
-				return fmt.Errorf("agent %q exhausted max_runs=%d for start condition %s", agent.Name, cond.MaxRuns, conditionLabel(&cond))
+				return false, fmt.Errorf("agent %q exhausted max_runs=%d for start condition %s", agent.Name, cond.MaxRuns, conditionLabel(&cond))
 			case "continue":
+				s.markExhausted(agent.Name, condIndex)
 				continue
 			default:
-				return fmt.Errorf("agent %q exhausted max_runs=%d with unsupported on_exhaustion policy %q", agent.Name, cond.MaxRuns, policy)
+				target, ok := s.agents[policy]
+				if !ok {
+					return false, fmt.Errorf("agent %q exhausted max_runs=%d with unsupported on_exhaustion policy %q", agent.Name, cond.MaxRuns, policy)
+				}
+				if !s.inputsAvailableLocked(target) {
+					return false, fmt.Errorf("agent %q exhausted max_runs=%d but on_exhaustion route %q has unavailable inputs", agent.Name, cond.MaxRuns, policy)
+				}
+				s.markExhausted(agent.Name, condIndex)
+				s.forced[target.Name] = true
+				return true, nil
 			}
 		}
 	}
 
-	return nil
+	return false, nil
+}
+
+func (s *flowState) exhaustionHandled(agentName string, condIndex int) bool {
+	return s.exhausted[agentName] != nil && s.exhausted[agentName][condIndex]
+}
+
+func (s *flowState) markExhausted(agentName string, condIndex int) {
+	if s.exhausted[agentName] == nil {
+		s.exhausted[agentName] = make(map[int]bool)
+	}
+	s.exhausted[agentName][condIndex] = true
 }
 
 func (s *flowState) conditionExhausted(agent *model.Agent, cond *model.Condition) bool {
@@ -276,6 +314,15 @@ func (s *flowState) conditionExhausted(agent *model.Agent, cond *model.Condition
 	if !s.conditionMetIgnoringMaxRuns(agent.Name, cond) {
 		return false
 	}
+	for name, input := range agent.Inputs {
+		if !s.inputAvailable(name, &input) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *flowState) inputsAvailableLocked(agent *model.Agent) bool {
 	for name, input := range agent.Inputs {
 		if !s.inputAvailable(name, &input) {
 			return false

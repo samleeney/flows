@@ -101,6 +101,16 @@ func writeAgent(buf *bytes.Buffer, agent *model.Agent) error {
 	buf.Write(data)
 	buf.WriteString("```\n\n")
 
+	if agent.Goal != nil {
+		goalData, err := yaml.Marshal(agent.Goal)
+		if err != nil {
+			return err
+		}
+		buf.WriteString("```goal\n")
+		buf.Write(goalData)
+		buf.WriteString("```\n\n")
+	}
+
 	// Content
 	if agent.Content != "" {
 		switch agent.NodeType {

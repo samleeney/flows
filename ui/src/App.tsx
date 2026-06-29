@@ -25,6 +25,7 @@ import {
 } from "./flowToReactFlow";
 import { AgentNode, FunctionNode } from "./AgentNode";
 import {
+  GoalNode,
   InputNode,
   LoopFrameNode,
   OutputNode,
@@ -42,6 +43,7 @@ const nodeTypes = {
   functionNode: FunctionNode,
   inputNode: InputNode,
   outputNode: OutputNode,
+  goalNode: GoalNode,
   terminalNode: TerminalNode,
   loopFrameNode: LoopFrameNode,
 };
@@ -277,6 +279,7 @@ function DetailsPanel({
         {agent ? <AgentDetails agent={agent} data={data} /> : null}
         {kind === "input" ? <InputDetails data={data} /> : null}
         {kind === "output" ? <OutputDetails data={data} /> : null}
+        {kind === "goal" ? <GoalDetails data={data} /> : null}
         {kind === "terminal" ? <TerminalDetails data={data} /> : null}
       </div>
     </div>
@@ -344,9 +347,33 @@ function AgentDetails({
           .map((start) => formatStartCondition(start))
           .join("\n")}
       />
+      {agent.goal ? (
+        <DetailRow
+          label="goal"
+          value={formatGoal(agent.goal)}
+        />
+      ) : null}
       <DetailRow label="content" value={agent.content.slice(0, 1200)} />
     </>
   );
+}
+
+function formatGoal(goal: NonNullable<FlowJSON["agents"][number]["goal"]>) {
+  const lines = [`Objective: ${goal.objective}`];
+  if (goal.validation?.length) {
+    lines.push("Validation:");
+    lines.push(...goal.validation.map((item) => `- ${item}`));
+  }
+  if (goal.max_turns) {
+    lines.push(`Max turns: ${goal.max_turns}`);
+  }
+  if (goal.token_budget) {
+    lines.push(`Token budget: ${goal.token_budget}`);
+  }
+  if (goal.on_exhaustion) {
+    lines.push(`On exhaustion: ${goal.on_exhaustion}`);
+  }
+  return lines.join("\n");
 }
 
 function formatStartCondition(start: FlowJSON["agents"][number]["start"][number]) {
@@ -385,6 +412,23 @@ function OutputDetails({ data }: { data: Record<string, unknown> }) {
       <DetailRow label="goes to" value={data.target} />
       <DetailRow label="target input" value={data.inputName} />
       <DetailRow label="condition" value={data.condition} />
+    </>
+  );
+}
+
+function GoalDetails({ data }: { data: Record<string, unknown> }) {
+  const validation = Array.isArray(data.validation)
+    ? data.validation.join("\n")
+    : undefined;
+  return (
+    <>
+      <DetailRow label="kind" value="goal" />
+      <DetailRow label="attached block" value={data.target} />
+      <DetailRow label="objective" value={data.objective} />
+      <DetailRow label="validation" value={validation} />
+      <DetailRow label="max turns" value={data.maxTurns} />
+      <DetailRow label="token budget" value={data.tokenBudget} />
+      <DetailRow label="on exhaustion" value={data.onExhaustion} />
     </>
   );
 }

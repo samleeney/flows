@@ -200,6 +200,27 @@ func buildLLMPrompt(req ExecutionRequest) (systemPrompt, userPrompt string) {
 		b.WriteByte('\n')
 	}
 
+	if req.Agent.Goal != nil {
+		b.WriteString("Goal:\n")
+		fmt.Fprintf(&b, "Objective: %s\n", req.Agent.Goal.Objective)
+		if len(req.Agent.Goal.Validation) > 0 {
+			b.WriteString("Validation:\n")
+			for _, item := range req.Agent.Goal.Validation {
+				fmt.Fprintf(&b, "- %s\n", item)
+			}
+		}
+		if req.Agent.Goal.MaxTurns > 0 {
+			fmt.Fprintf(&b, "Max turns: %d\n", req.Agent.Goal.MaxTurns)
+		}
+		if req.Agent.Goal.TokenBudget > 0 {
+			fmt.Fprintf(&b, "Token budget: %d\n", req.Agent.Goal.TokenBudget)
+		}
+		if req.Agent.Goal.OnExhaustion != "" {
+			fmt.Fprintf(&b, "On exhaustion: %s\n", req.Agent.Goal.OnExhaustion)
+		}
+		b.WriteByte('\n')
+	}
+
 	b.WriteString("Inputs:\n")
 	if len(req.Inputs) == 0 {
 		b.WriteString("(none)\n")

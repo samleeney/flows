@@ -62,6 +62,10 @@ type edge struct {
 func buildEdges(flow *model.Flow) []edge {
 	var edges []edge
 	seen := make(map[string]bool)
+	agentNames := make(map[string]bool)
+	for _, agent := range flow.Agents {
+		agentNames[agent.Name] = true
+	}
 
 	for _, agent := range flow.Agents {
 		// Edges from start condition dependencies
@@ -86,6 +90,13 @@ func buildEdges(flow *model.Flow) []edge {
 					edges = append(edges, edge{from: dep, to: agent.Name, label: label})
 				}
 			}
+			if isExhaustionRoute(cond.OnExhaustion, agentNames) {
+				addRouteEdge(&edges, seen, agent.Name, cond.OnExhaustion)
+			}
+		}
+
+		if isExhaustionRoute(agent.OnExhaustion, agentNames) {
+			addRouteEdge(&edges, seen, agent.Name, agent.OnExhaustion)
 		}
 
 		// Edges from data inputs (only if not already covered by start conditions)
@@ -112,4 +123,22 @@ func buildEdges(flow *model.Flow) []edge {
 	}
 
 	return edges
+}
+
+func addRouteEdge(edges *[]edge, seen map[string]bool, from, to string) {
+	edgeKey := from + "->" + to + "|on exhaustion"
+	if seen[edgeKey] {
+		return
+	}
+	seen[edgeKey] = true
+	*edges = append(*edges, edge{from: from, to: to, label: "on exhaustion"})
+}
+
+func isExhaustionRoute(value string, agentNames map[string]bool) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "stop", "continue":
+		return false
+	default:
+		return agentNames[value]
+	}
 }

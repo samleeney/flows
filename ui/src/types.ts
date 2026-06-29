@@ -17,6 +17,7 @@ export interface AgentJSON {
   position: [number, number];
   inputs: Record<string, InputJSON>;
   start: ConditionJSON[];
+  goal?: GoalJSON;
   node_type: "prompt" | "function";
   language?: string;
   content: string;
@@ -24,6 +25,14 @@ export interface AgentJSON {
   model?: string;
   temperature?: number;
   on_error?: string;
+  on_exhaustion?: string;
+}
+
+export interface GoalJSON {
+  objective: string;
+  validation?: string[];
+  max_turns?: number;
+  token_budget?: number;
   on_exhaustion?: string;
 }
 
