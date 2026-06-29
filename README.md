@@ -1,9 +1,9 @@
 # Flows
 
 Markdown-native agent workflows: write prompts, code blocks, inputs, outputs,
-goals, and loops in one `.md` file, then run or visualize the flow. Inspired by
-Ralph-style persistent agent loops, especially
-[Ralph Orchestrator](https://github.com/mikeyobrien/ralph-orchestrator).
+goals, and loops in one `.md` file, then run or visualize the flow.
+
+Inspired by https://github.com/snarktank/ralph.
 
 ![Flows browser UI showing a goal-backed JAX optimization loop](docs/assets/flow-ui-demo.png)
 
