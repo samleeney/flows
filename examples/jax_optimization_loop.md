@@ -13,7 +13,7 @@ defaults:
 ## speed_optimizer
 
 ```yaml
-position: [4, 1]
+position: [8, 4]
 inputs:
     code: {from: benchmark, fallback: external}
     target_ms: {from: external}
@@ -40,7 +40,7 @@ Return only one fenced `python` code block containing the complete revised code.
 ## memory_optimizer
 
 ```yaml
-position: [15, 1]
+position: [16, 5]
 inputs:
     code: {from: speed_optimizer}
     target_ms: {from: external}
@@ -61,7 +61,7 @@ Return only one fenced `python` code block containing the complete revised code.
 ## waste_reducer
 
 ```yaml
-position: [25, 2]
+position: [25, 6]
 inputs:
     code: {from: memory_optimizer}
     target_ms: {from: external}
@@ -81,7 +81,7 @@ Return only one fenced `python` code block containing the complete revised code.
 ## benchmark
 
 ```yaml
-position: [36, 3]
+position: [33, 6]
 inputs:
     code: {from: waste_reducer}
     target_ms: {from: external}
