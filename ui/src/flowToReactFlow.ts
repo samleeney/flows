@@ -420,6 +420,10 @@ export function flowToEdges(flow: FlowJSON): Edge[] {
   return edges;
 }
 
+export function timelineLayout(flow: FlowJSON, nodes: Node[]): Node[] {
+  return enforceTimelinePositions(flow, nodes);
+}
+
 interface InputSummary {
   name: string;
   source: string;
@@ -617,8 +621,18 @@ function adjustRanksForLoopExits(
   const loopKeys = new Set(loops.map((loop) => loop.key));
 
   let changed = true;
+  let iterations = 0;
+  const maxIterations = Math.max(
+    100,
+    edges.length * Math.max(1, loops.length) * 4
+  );
   while (changed) {
     changed = false;
+    iterations += 1;
+    if (iterations > maxIterations) {
+      console.warn("Flow rank adjustment did not converge; using base ranks");
+      return new Map(baseRanks);
+    }
 
     for (const loop of loops) {
       const loopEnd = maxRankForBody(ranks, loop.body);
@@ -1264,13 +1278,21 @@ function enforceTimelinePositions(flow: FlowJSON, nodes: Node[]): Node[] {
     nodes.map((node) => [node.id, node.position] as const)
   );
   const agentPositions = new Map<string, { x: number; y: number }>();
+  const collapsedPositions =
+    flow.agents.length > 1 &&
+    new Set(flow.agents.map((agent) => agent.position.join(","))).size === 1;
+  const rankLaneCounts = new Map<number, number>();
 
   for (const agent of flow.agents) {
     const rank = ranks.get(agent.name) ?? 0;
     const existing = nodePositions.get(agent.name);
+    const lane = rankLaneCounts.get(rank) ?? 0;
+    rankLaneCounts.set(rank, lane + 1);
     agentPositions.set(agent.name, {
       x: (rank + 1) * TIME_RANK_SPACING,
-      y: existing?.y ?? agent.position[1] * GRID_SIZE,
+      y: collapsedPositions
+        ? lane * (AGENT_NODE_HEIGHT + 190)
+        : existing?.y ?? agent.position[1] * GRID_SIZE,
     });
   }
 
