@@ -30,6 +30,7 @@ import {
   flowToNodes,
   flowToEdges,
   autoLayout,
+  timelineLayout,
   nodesToFlow,
   decorateNodes,
 } from "./flowToReactFlow";
@@ -68,6 +69,10 @@ const FIT_VIEW_OPTIONS = {
   maxZoom: 1.2,
   duration: 180,
 };
+const AUTO_LAYOUT_NODE_LIMIT = 140;
+const AUTO_LAYOUT_EDGE_LIMIT = 220;
+const FLOW_FALLBACK_LOAD_MS = 500;
+const DEFER_AUTO_LAYOUT_MS = 50;
 
 export default function App() {
   const [flow, setFlow] = useState<FlowJSON | null>(null);
@@ -83,21 +88,35 @@ export default function App() {
     const seq = ++layoutSeq.current;
     const newNodes = flowToNodes(newFlow);
     const newEdges = flowToEdges(newFlow);
+    const initialNodes = timelineLayout(newFlow, newNodes);
 
-    void autoLayout(newFlow, newNodes, newEdges)
-      .then((layoutedNodes) => {
-        if (layoutSeq.current !== seq) return;
-        const layoutedFlow = nodesToFlow(newFlow, layoutedNodes);
-        setFlow(layoutedFlow);
-        setNodes(layoutedNodes);
-        setEdges(newEdges);
-        if (!sameAgentPositions(newFlow, layoutedFlow)) {
-          sendUpdateRef.current(layoutedFlow);
-        }
-      })
-      .catch((err) => {
-        console.error("ELK layout failed", err);
-      });
+    setFlow(newFlow);
+    setNodes(initialNodes);
+    setEdges(newEdges);
+
+    if (
+      newNodes.length > AUTO_LAYOUT_NODE_LIMIT ||
+      newEdges.length > AUTO_LAYOUT_EDGE_LIMIT
+    ) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      void autoLayout(newFlow, newNodes, newEdges)
+        .then((layoutedNodes) => {
+          if (layoutSeq.current !== seq) return;
+          const layoutedFlow = nodesToFlow(newFlow, layoutedNodes);
+          setFlow(layoutedFlow);
+          setNodes(layoutedNodes);
+          setEdges(newEdges);
+          if (!sameAgentPositions(newFlow, layoutedFlow)) {
+            sendUpdateRef.current(layoutedFlow);
+          }
+        })
+        .catch((err) => {
+          console.error("ELK layout failed", err);
+        });
+    }, DEFER_AUTO_LAYOUT_MS);
   }, []);
 
   const onRunSnapshot = useCallback((snap: RunSnapshot) => {
@@ -113,6 +132,27 @@ export default function App() {
     onRunSnapshot,
     onRunEvent,
   });
+
+  useEffect(() => {
+    if (flow) return;
+    const timer = window.setTimeout(() => {
+      if (layoutSeq.current > 0) return;
+      void fetch("/api/flow")
+        .then((resp) => {
+          if (!resp.ok) throw new Error(`load flow: ${resp.status}`);
+          return resp.json() as Promise<FlowJSON>;
+        })
+        .then((loadedFlow) => {
+          if (layoutSeq.current === 0) {
+            onFlowUpdate(loadedFlow);
+          }
+        })
+        .catch((err) => {
+          console.error("Flow fallback load failed", err);
+        });
+    }, FLOW_FALLBACK_LOAD_MS);
+    return () => window.clearTimeout(timer);
+  }, [flow, onFlowUpdate]);
 
   useEffect(() => {
     sendUpdateRef.current = sendUpdate;
