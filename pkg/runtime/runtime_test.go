@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/samleeney/flows/pkg/model"
 )
@@ -20,6 +21,31 @@ type mockPromptExecutor struct {
 type mockCall struct {
 	Content string
 	Inputs  map[string]string
+}
+
+type continuousSchedulerExecutor struct {
+	releaseSlow      <-chan struct{}
+	fastChildStarted chan<- struct{}
+	fastChildOnce    sync.Once
+}
+
+func (e *continuousSchedulerExecutor) Execute(ctx context.Context, content string, _ map[string]string) (string, error) {
+	switch content {
+	case "slow root":
+		select {
+		case <-e.releaseSlow:
+			return "slow complete", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	case "fast root":
+		return "fast complete", nil
+	case "fast child":
+		e.fastChildOnce.Do(func() { e.fastChildStarted <- struct{}{} })
+		return "child complete", nil
+	default:
+		return "", fmt.Errorf("unexpected content %q", content)
+	}
 }
 
 func (m *mockPromptExecutor) Execute(_ context.Context, content string, inputs map[string]string) (string, error) {
@@ -483,6 +509,69 @@ func TestRunParallelExecution(t *testing.T) {
 	}
 	if _, ok := result.Outputs["joiner"]; !ok {
 		t.Error("joiner should have output")
+	}
+}
+
+func TestRunStartsReadyDownstreamWithoutWaitingForSlowSibling(t *testing.T) {
+	releaseSlow := make(chan struct{})
+	fastChildStarted := make(chan struct{}, 1)
+	released := false
+	defer func() {
+		if !released {
+			close(releaseSlow)
+		}
+	}()
+
+	flow := &model.Flow{
+		Name: "Continuous scheduling",
+		Agents: []model.Agent{
+			{
+				Name:     "slow_root",
+				NodeType: model.PromptNode,
+				Start:    []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+				Content:  "slow root",
+			},
+			{
+				Name:     "fast_root",
+				NodeType: model.PromptNode,
+				Start:    []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+				Content:  "fast root",
+			},
+			{
+				Name:     "fast_child",
+				NodeType: model.PromptNode,
+				Inputs:   map[string]model.Input{"value": {From: "fast_root"}},
+				Start:    []model.Condition{{When: model.StringOrList{"fast_root"}}},
+				Content:  "fast child",
+			},
+		},
+	}
+
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), flow, NewExecutorRegistry(&continuousSchedulerExecutor{
+			releaseSlow:      releaseSlow,
+			fastChildStarted: fastChildStarted,
+		}), RunOptions{})
+		runDone <- err
+	}()
+
+	select {
+	case <-fastChildStarted:
+		// The fast lane progressed while slow_root was still blocked.
+	case <-time.After(time.Second):
+		t.Fatal("fast_child did not start before slow_root completed")
+	}
+
+	close(releaseSlow)
+	released = true
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("run did not finish after slow_root was released")
 	}
 }
 

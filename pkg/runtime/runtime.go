@@ -103,9 +103,37 @@ func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
 		s.emitRunFinished(ok, errStr)
 	}()
 
+	// Continuous scheduler: dispatch every newly-ready agent the moment it
+	// becomes ready, and re-evaluate readiness as soon as any single agent
+	// finishes — a lane never waits for its siblings in the same "level" to
+	// catch up. On the first error, stop dispatching new work but drain the
+	// agents already in flight before returning.
+	type agentDone struct {
+		name string
+		err  error
+	}
+	doneCh := make(chan agentDone)
+	running := make(map[string]bool)
+	var firstErr error
+
 	for {
-		ready := s.findReady()
-		if len(ready) == 0 {
+		if firstErr == nil {
+			for _, agent := range s.findReady() {
+				if running[agent.Name] {
+					continue
+				}
+				running[agent.Name] = true
+				go func(a *model.Agent) {
+					doneCh <- agentDone{a.Name, s.executeAgent(ctx, a)}
+				}(agent)
+			}
+		}
+
+		if len(running) == 0 {
+			if firstErr != nil {
+				err = firstErr
+				return nil, err
+			}
 			routed, exhaustionErr := s.handleExhaustion()
 			if exhaustionErr != nil {
 				err = exhaustionErr
@@ -117,26 +145,10 @@ func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
 			break
 		}
 
-		// Execute all ready agents in parallel
-		var wg sync.WaitGroup
-		errCh := make(chan error, len(ready))
-
-		for _, agent := range ready {
-			wg.Add(1)
-			go func(a *model.Agent) {
-				defer wg.Done()
-				if err := s.executeAgent(ctx, a); err != nil {
-					errCh <- fmt.Errorf("agent %q: %w", a.Name, err)
-				}
-			}(agent)
-		}
-
-		wg.Wait()
-		close(errCh)
-
-		for e := range errCh {
-			err = e
-			return nil, err
+		d := <-doneCh
+		delete(running, d.name)
+		if d.err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("agent %q: %w", d.name, d.err)
 		}
 	}
 
