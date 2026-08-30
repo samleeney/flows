@@ -237,7 +237,7 @@ concise.
 
 - [ ] README CLI documentation includes JSON validation, inspection, stdin,
       JSON inputs, JSON execution, JSONL execution, and `--no-editor` examples.
-- [ ] The existing `.codex/skills/flows/SKILL.md` is updated; no second Flows
+- [ ] The existing `.agents/skills/flows/SKILL.md` is updated; no second Flows
       skill is introduced.
 - [ ] The skill tells agents to prefer JSON for bounded commands, JSONL when
       monitoring live execution, and text/chart output when communicating with
@@ -356,7 +356,7 @@ model.
 
     ```bash
     /home/sam/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
-      .codex/skills/flows
+      .agents/skills/flows
     ```
 
 ## 8. Success Metrics
