@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/samleeney/flows/pkg/model"
 )
@@ -36,6 +37,9 @@ exit 2
 	}
 
 	exec := NewCodexCLIExecutor(CodexCLIConfig{Command: fake})
+	if exec.cfg.Timeout != time.Hour {
+		t.Fatalf("default timeout = %s, want %s", exec.cfg.Timeout, time.Hour)
+	}
 	out, err := exec.ExecuteAgent(context.Background(), ExecutionRequest{
 		Defaults: model.Defaults{Model: "gpt-5.3-codex-spark"},
 		Agent:    model.Agent{Name: "speed_optimizer"},

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/samleeney/flows/pkg/model"
 )
@@ -37,6 +38,9 @@ func TestHTTPPromptExecutorAnthropic(t *testing.T) {
 		AnthropicBaseURL: srv.URL,
 		MaxTokens:        123,
 	})
+	if exec.cfg.Timeout != 2*time.Minute {
+		t.Fatalf("default timeout = %s, want %s", exec.cfg.Timeout, 2*time.Minute)
+	}
 
 	out, err := exec.ExecuteAgent(context.Background(), ExecutionRequest{
 		FlowName: "Review Flow",

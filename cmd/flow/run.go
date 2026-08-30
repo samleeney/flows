@@ -197,7 +197,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&llmProvider, "llm-provider", os.Getenv("FLOW_LLM_PROVIDER"), "LLM provider for prompt nodes: anthropic or openai (default: infer from model)")
 	cmd.Flags().StringVar(&llmModel, "model", os.Getenv("FLOW_MODEL"), "Override model for all prompt nodes (default: flow/agent model)")
 	cmd.Flags().IntVar(&maxTokens, "max-tokens", envInt("FLOW_MAX_TOKENS", runtime.DefaultMaxTokens), "Maximum output tokens for prompt nodes")
-	cmd.Flags().DurationVar(&llmTimeout, "llm-timeout", envDuration("FLOW_LLM_TIMEOUT", runtime.DefaultPromptTimeout), "Timeout for each prompt-node LLM request")
+	cmd.Flags().DurationVar(&llmTimeout, "llm-timeout", envDuration("FLOW_LLM_TIMEOUT", 0), "Override the backend timeout for each prompt-node LLM request")
 
 	return cmd
 }

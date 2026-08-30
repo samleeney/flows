@@ -17,6 +17,7 @@ const (
 	DefaultCodexModel           = "gpt-5.3-codex-spark"
 	DefaultCodexSandbox         = "read-only"
 	DefaultCodexWriteSandbox    = "workspace-write"
+	DefaultCodexTimeout         = 1 * time.Hour
 )
 
 // CodexCLIConfig configures the headless Codex CLI prompt executor.
@@ -40,7 +41,7 @@ func NewCodexCLIExecutor(cfg CodexCLIConfig) *CodexCLIExecutor {
 		cfg.Command = DefaultCodexCommand
 	}
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = DefaultPromptTimeout
+		cfg.Timeout = DefaultCodexTimeout
 	}
 	if cfg.Sandbox == "" {
 		cfg.Sandbox = DefaultCodexSandbox
