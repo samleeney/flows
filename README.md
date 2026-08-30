@@ -63,9 +63,112 @@ Rewrite the input code to reduce runtime. Return only the improved code.
 
 ## CLI
 
+Human-oriented commands remain the default:
+
 ```bash
 ./flow validate <flow.md>
 ./flow run <flow.md> -f --input name=value --input file=@path/to/file
 ./flow chart <flow.md>
 ./flow viz <flow.md>
 ```
+
+Use `--no-editor` for an attached headless text run. Without `-f`, text mode
+still starts a background process and reports its log path.
+
+```bash
+./flow run <flow.md> -f --no-editor --input name=value
+```
+
+### Machine interface
+
+Machine results use `schema_version: 1`. JSON modes write only JSON to stdout;
+normal structured failures are returned in that same stream rather than as
+prose on stderr.
+
+Validate a file or generated source from stdin:
+
+```bash
+./flow validate flow.md --json
+./flow validate - --json < flow.md
+```
+
+Inspect the parsed graph, including ordered blocks, content, inputs, start
+conditions, goals, overrides, and explicit dependency edges:
+
+```bash
+./flow inspect flow.md --json
+./flow inspect - --json < flow.md
+```
+
+The single-document validation shape is:
+
+```json
+{
+  "schema_version": 1,
+  "command": "validate",
+  "ok": true,
+  "flow": {
+    "source": "flow.md",
+    "name": "Example",
+    "description": "An example flow",
+    "external_inputs": ["code"],
+    "block_count": 2,
+    "defaults": {"prompt_executor": "codex_cli", "model": "gpt-5.3-codex-spark", "temperature": 0.2}
+  }
+}
+```
+
+Dry-run or execute once and receive one final JSON document. These modes imply
+foreground execution and `--no-editor`; they never create a detached run.
+
+```bash
+./flow run flow.md --dry-run --json --input code=@candidate.py
+./flow run flow.md --json --input code=@candidate.py
+./flow run flow.md --json --output results --input code=@candidate.py
+```
+
+For long runs, stream one versioned event per line. Events include
+`run_started`, `block_started`, `block_finished`, optional `execution_error`,
+and a terminal `run_finished` containing every final output in flow source
+order.
+
+```bash
+./flow run flow.md --jsonl --input code=@candidate.py
+```
+
+Supply multiline external inputs as a JSON object. Values must be strings;
+repeatable `--input` flags are applied afterward and override the same JSON
+keys.
+
+```bash
+./flow run flow.md --json --inputs-json inputs.json
+printf '%s' '{"code":"line one\nline two"}' | \
+  ./flow run flow.md --json --inputs-json -
+./flow run flow.md --json --inputs-json inputs.json --input target_ms=5
+```
+
+`-` can own stdin for either the flow source or `--inputs-json`, but not both
+in one invocation. `flow viz -` also accepts flow source from stdin, and
+`flow viz flow.md --json` wraps the Mermaid text in the versioned result.
+
+Structured errors have a stable code and message, with parse/validation
+diagnostics where applicable:
+
+```json
+{
+  "schema_version": 1,
+  "command": "validate",
+  "ok": false,
+  "error": {
+    "code": "invalid_flow",
+    "message": "validation failed for flow.md",
+    "diagnostics": [
+      {"phase": "validation", "source": "flow.md", "block": "review", "field": "start", "message": "at least one start condition required"}
+    ]
+  }
+}
+```
+
+Exit status is `0` for success, `2` for invalid arguments/flow/input, `3` for
+an execution failure, and `1` for an unexpected internal failure. `--json`
+and `--jsonl` are mutually exclusive.

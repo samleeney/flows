@@ -26,7 +26,7 @@ const (
 // specific run. Values are previewed and capped by the caller before emission.
 type ExternalInputOrigin struct {
 	Name             string `json:"name"`
-	Source           string `json:"source"` // inline or file
+	Source           string `json:"source"` // inline, file, or json
 	Path             string `json:"path,omitempty"`
 	FileName         string `json:"file_name,omitempty"`
 	Bytes            int    `json:"bytes,omitempty"`

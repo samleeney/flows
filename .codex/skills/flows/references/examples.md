@@ -799,6 +799,90 @@ Use `--dry-run` when checking structure without running agents:
 ./flow run examples/jax_optimization_loop.md --dry-run --input code=@examples/inputs/slow_jax.py --input target_ms=5
 ```
 
+## Machine-Friendly CLI
+
+Use the versioned machine interface for agent and script work. Every JSON
+document contains `schema_version`, `command`, and `ok`; structured stdout has
+no browser URL, progress prose, or output headings.
+
+Validate and inspect without reimplementing the Markdown parser:
+
+```bash
+./flow validate flow.md --json
+./flow inspect flow.md --json
+./flow validate - --json < generated-flow.md
+./flow inspect - --json < generated-flow.md
+```
+
+`inspect` includes metadata, defaults, external inputs, source-ordered blocks,
+prompt/code content, goal metadata, and explicit input, fallback, start, and
+exhaustion edges. Node kinds are stable strings: `prompt` or `function`.
+
+A machine dry-run requires all declared external inputs and executes no block:
+
+```bash
+./flow run flow.md --dry-run --json \
+  --input code=@candidate.py \
+  --input target_ms=5
+```
+
+For one terminal result, use `--json`. It runs in the foreground without an
+editor or detached process and returns run ID, timing, and untruncated outputs
+in block source order:
+
+```bash
+./flow run flow.md --json \
+  --input code=@candidate.py \
+  --input target_ms=5
+```
+
+For progress monitoring, use JSON Lines:
+
+```bash
+./flow run flow.md --jsonl \
+  --input code=@candidate.py \
+  --input target_ms=5
+```
+
+Decode each line independently. Event order is `run_started`, one or more
+`block_started`/`block_finished` pairs, optional `execution_error`, then
+`run_finished`. Every event has a run ID and strictly increasing sequence. The
+terminal event contains complete outputs; intermediate block events contain a
+bounded preview.
+
+Use a JSON object when values contain newlines or shell punctuation:
+
+```bash
+./flow run flow.md --json --inputs-json inputs.json
+printf '%s' '{"code":"line one\nline two","target_ms":"5"}' | \
+  ./flow run flow.md --json --inputs-json -
+```
+
+JSON values must be strings. A later `--input name=value` or
+`--input name=@path` overrides the same key from `--inputs-json`. Stdin may be
+the flow (`flow run -`) or the JSON input source (`--inputs-json -`), never
+both. Generated flow source can still use ordinary flags for values:
+
+```bash
+./flow run - --json --input topic='compiler design' < generated-flow.md
+```
+
+Use `--output results` with `--json` to write `<block>.txt` files; the result
+reports the directory and each path. Use `--no-editor -f` when a human wants
+headless text. Background text with `--no-editor` remains supported and prints
+the child PID and log path.
+
+Exit status meanings:
+
+- `0`: success.
+- `2`: invalid CLI arguments, flow, or external input data.
+- `3`: a block/execution failure; inspect the structured terminal error and
+  any partial outputs.
+- `1`: an unexpected internal failure.
+
+`--json` and `--jsonl` cannot be combined. Prefer text output and `chart` when
+the purpose is human review rather than machine consumption.
+
 ## Choosing Prompt Executors
 
 Prompt executor choice belongs in the flow defaults or in each prompt block config.

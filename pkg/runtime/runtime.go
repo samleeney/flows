@@ -32,7 +32,10 @@ type RunOptions struct {
 
 // RunResult contains the outputs of a completed flow execution.
 type RunResult struct {
-	Outputs map[string]string // agent name → last output
+	RunID      string
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Outputs    map[string]string // agent name → last output
 }
 
 // Run executes a flow to completion.
@@ -90,17 +93,23 @@ type flowState struct {
 	// observer publish so ordering at the queue is strict.
 	emitMu sync.Mutex
 	seq    uint64
+
+	startedAt  time.Time
+	finishedAt time.Time
 }
 
 func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
+	s.startedAt = time.Now().UTC()
 	s.emitRunStarted()
 	defer func() {
+		s.finishedAt = time.Now().UTC()
 		ok := err == nil
 		var errStr string
 		if err != nil {
 			errStr = err.Error()
 		}
 		s.emitRunFinished(ok, errStr)
+		result = s.snapshotResult()
 	}()
 
 	// Continuous scheduler: dispatch every newly-ready agent the moment it
@@ -132,12 +141,12 @@ func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
 		if len(running) == 0 {
 			if firstErr != nil {
 				err = firstErr
-				return nil, err
+				return result, err
 			}
 			routed, exhaustionErr := s.handleExhaustion()
 			if exhaustionErr != nil {
 				err = exhaustionErr
-				return nil, err
+				return result, err
 			}
 			if routed {
 				continue
@@ -152,14 +161,22 @@ func (s *flowState) run(ctx context.Context) (result *RunResult, err error) {
 		}
 	}
 
-	result = &RunResult{Outputs: make(map[string]string)}
+	return result, nil
+}
+
+func (s *flowState) snapshotResult() *RunResult {
+	result := &RunResult{
+		RunID:      s.runID,
+		StartedAt:  s.startedAt,
+		FinishedAt: s.finishedAt,
+		Outputs:    make(map[string]string),
+	}
 	s.mu.Lock()
 	for k, v := range s.outputs {
 		result.Outputs[k] = v
 	}
 	s.mu.Unlock()
-
-	return result, nil
+	return result
 }
 
 func missingExternalInputs(flow *model.Flow, inputs map[string]string) []string {

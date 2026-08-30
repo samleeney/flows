@@ -18,14 +18,27 @@ Use this skill whenever the user wants to create, modify, run, inspect, visualiz
 Useful commands:
 
 ```bash
-./flow validate examples/jax_optimization_loop.md
-./flow run examples/jax_optimization_loop.md --dry-run
-./flow run examples/jax_optimization_loop.md -f --input code=@examples/inputs/slow_jax.py --input target_ms=5
+./flow validate examples/jax_optimization_loop.md --json
+./flow inspect examples/jax_optimization_loop.md --json
+./flow run examples/jax_optimization_loop.md --dry-run --json --input code=@examples/inputs/slow_jax.py --input target_ms=5
+./flow run examples/jax_optimization_loop.md --json --input code=@examples/inputs/slow_jax.py --input target_ms=5
 ./flow chart examples/jax_optimization_loop.md
 ./flow viz examples/jax_optimization_loop.md
 ```
 
 By default, `./flow run <file>` prints a browser link for the run and starts it in the background. With `-f`, it prints the link and tails execution live.
+
+## Machine And Human Interfaces
+
+- When Codex or another program needs a bounded result, prefer `--json` for validation, inspection, dry-runs, and execution. Parse the result instead of scraping text.
+- Use `./flow run ... --jsonl` when the caller must monitor a long execution as it progresses. Treat `run_finished` as the terminal record.
+- `--json` and `--jsonl` execution is foreground-only and implicitly disables the editor and detached child process. Use `--no-editor` for headless human-readable text.
+- Use ordinary text output, `chart`, or `viz` when presenting or interactively exploring a flow with a human.
+- Use `-` for generated flow source on stdin. Use `--inputs-json <path|->` for multiline values; `--input` overrides matching JSON keys. Never assign stdin to both in one command.
+- Structured commands return exit `2` for invalid arguments/flow/input, `3` for execution failure, and `1` for an unexpected internal failure.
+
+Read the machine-interface section in `references/examples.md` for exact
+commands, event names, output shapes, and stdin rules.
 
 ## Request Routing
 
@@ -39,7 +52,7 @@ Map common user wording to Flows constructs:
 - If the user says a later agent needs the prior reasoning, make the earlier agent output a handoff summary or structured artifact, then pass it as a named input. Do not rely on hidden chat history.
 - If the user says "when the loop exhausts, call another agent", set `on_exhaustion: handler_agent` on the loop start rule and define that handler as a normal agent, usually without ordinary `start`.
 - If the user says the flow should edit repository files, use `prompt_executor: codex_cli_write` only on the editing agent. Otherwise use `codex_cli` for prompt agents.
-- If the user says "run/check/show the flow", use `./flow validate`, `./flow run --dry-run`, `./flow run -f`, `./flow chart`, or `./flow viz` as appropriate.
+- If the user says "run/check/show the flow", use structured `./flow validate --json`, `./flow inspect --json`, `./flow run --dry-run --json`, or `./flow run --json` for your own tool work; use `./flow run -f`, `./flow chart`, or `./flow viz` for human-facing interaction.
 
 ## Authoring Model
 
@@ -117,13 +130,13 @@ output = {"elapsed": elapsed, "passed": elapsed < 1.0}
 - Use `on_exhaustion: stop` for the default error behavior, `on_exhaustion: continue` to mark an exhausted route handled, or `on_exhaustion: <agent_name>` to fire an exhaustion-handler agent once.
 - Allow route-handler agents to omit ordinary `start` conditions when they are only reached through an `on_exhaustion` route.
 - Always include enough `external_inputs` and `inputs` declarations for data to move explicitly through the graph.
-- Always validate new or edited flows with `./flow validate <file>`; use `./flow run <file> --dry-run` before expensive or write-capable execution.
+- Always validate new or edited flows with `./flow validate <file> --json`; use `./flow run <file> --dry-run --json` with all required inputs before expensive or write-capable execution.
 - Prefer `codex_cli` with a quick Spark model for examples unless the user asks for another executor.
 - Use `codex_cli_write` only for prompt nodes that should edit files in the repository.
 - Use API executors only when the flow is intentionally meant to call an API and the required keys are available.
 - Do not assume the interactive Codex `/goal` slash command works in `codex exec` headless mode. Headless goal-style execution should be modeled by explicit prompts or implemented with persistent Codex thread IDs and `codex exec resume <thread_id>`.
 - Use an adjacent fenced `goal` block only for a goal attached to one agent card. Put it immediately after that agent's YAML config and before the normal prompt. Supported fields include `objective`, `validation`, `max_turns`, `token_budget`, and `on_exhaustion`.
 
-Read `references/examples.md` when creating nontrivial flows, explaining state
-handoff, using exhaustion routes, designing goal-style blocks, or debugging
-loops and execution order.
+Read `references/examples.md` when using the machine CLI, creating nontrivial
+flows, explaining state handoff, using exhaustion routes, designing goal-style
+blocks, or debugging loops and execution order.

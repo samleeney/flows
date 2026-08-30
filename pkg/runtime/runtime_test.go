@@ -607,3 +607,26 @@ func TestRunBashFunctionNode(t *testing.T) {
 		t.Errorf("greeter output = %q, want %q", result.Outputs["greeter"], "hello world")
 	}
 }
+
+func TestRunResultIncludesIdentityAndTiming(t *testing.T) {
+	flow := &model.Flow{
+		Name: "timed",
+		Agents: []model.Agent{{
+			Name:     "only",
+			NodeType: model.PromptNode,
+			Inputs:   map[string]model.Input{},
+			Start:    []model.Condition{{Always: &model.AlwaysCondition{MaxRuns: 1}}},
+			Content:  "hello",
+		}},
+	}
+	result, err := Run(context.Background(), flow, NewExecutorRegistry(&mockPromptExecutor{}), RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunID == "" {
+		t.Fatal("RunID is empty")
+	}
+	if result.StartedAt.IsZero() || result.FinishedAt.IsZero() || result.FinishedAt.Before(result.StartedAt) {
+		t.Fatalf("invalid timing: start=%v finish=%v", result.StartedAt, result.FinishedAt)
+	}
+}
