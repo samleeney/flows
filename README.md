@@ -34,6 +34,8 @@ FLOW_PYTHON_COMMAND=.venv/bin/python ./flow run examples/jax_short_goal_loop.md 
   --input target_ms=5
 ```
 
+See [the one-loop JAX demo](docs/jax-one-loop-demo.md) for a complete walkthrough.
+
 ## Flow Shape
 
 Each `##` heading is one block. The first fenced `yaml` block configures inputs,

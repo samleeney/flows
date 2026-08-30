@@ -157,7 +157,7 @@ target_ms: {target:.2f}
 ## polish
 
 ```yaml
-position: [49, 4]
+position: [49, 5]
 inputs:
     code: {from: final, fallback: bench}
     target_ms: {from: external}
@@ -180,7 +180,7 @@ Return only one fenced `python` block with the complete code.
 ## final
 
 ```yaml
-position: [57, 4]
+position: [57, 5]
 inputs:
     candidate: {from: polish}
     code: {from: external}
